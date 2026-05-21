@@ -16,8 +16,9 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
-# Default values
-BASE_IMAGE="nvidia/cuda:12.4.0-devel-ubuntu22.04"
+# Default values — must match Dockerfile.deb's ARG BASE_IMAGE default
+# (Ubuntu 24.04 ships pip with --break-system-packages; 22.04's pip doesn't)
+BASE_IMAGE="nvidia/cuda:12.6.0-devel-ubuntu24.04"
 OUTPUT_DIR=""
 
 # Parse arguments
