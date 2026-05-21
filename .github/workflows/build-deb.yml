@@ -41,6 +41,9 @@ jobs:
       - name: Upload Debian packages
         uses: actions/upload-artifact@v4
         with:
-          name: debian-packages-${{ matrix.label }}
+          # Artifact name must match flagos-packaging components/libtriton-jit.yml
+          # artifact_pattern "libtriton-jit-*-packages" so the central publish
+          # pipeline can locate it.
+          name: libtriton-jit-${{ matrix.label }}-packages
           path: output/*.deb
           retention-days: 7

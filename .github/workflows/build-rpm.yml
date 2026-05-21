@@ -41,7 +41,9 @@ jobs:
       - name: Upload RPM packages
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-packages-${{ matrix.label }}
+          # Match flagos-packaging components/libtriton-jit.yml
+          # artifact_pattern "libtriton-jit-*-rpm-packages".
+          name: libtriton-jit-${{ matrix.label }}-rpm-packages
           path: |
             output/rpms/**/*.rpm
             output/srpms/**/*.rpm
