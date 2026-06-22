@@ -8,11 +8,13 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "fmt/core.h"
 #include "triton_jit/backend_config.h"
 #include "triton_jit/backend_policy.h"
+#include "triton_jit/config.h"
 #include "triton_jit/jit_utils.h"
 #include "triton_jit/triton_kernel.h"
 
@@ -213,6 +215,59 @@ struct ArgHandle {
   }
 };
 
+// Result of walking a kernel arg pack: the runtime arg buffer (carrying
+// non-constexpr / specialized args + global_scratch slots) and the kernel
+// `full_signature` string (used both as overload cache key and to launch).
+struct SignaturePack {
+  ParameterBuffer buffer;
+  std::string full_signature;
+};
+
+// Build a SignaturePack for the legacy positional-call shape (operator()).
+// All constexpr values are provided inline in `args...` at the positions
+// dictated by `static_sig`.
+template <typename... Args>
+SignaturePack build_pack(const StaticSignature& static_sig, Args... args) {
+  const int num_args = static_sig.num_args;
+  SignaturePack pack;
+  pack.buffer.reserve(num_args);
+  c10::SmallVector<std::string> signature;
+  signature.reserve(num_args);
+  ArgHandle handler = {static_sig, pack.buffer, signature, 0};
+  (handler.handle_arg(args), ...);
+#if !defined(BACKEND_NPU)
+  handler.append_global_scratch();
+  handler.append_global_scratch();
+#endif
+  pack.full_signature = join_sig(signature);
+  return pack;
+}
+
+// Build a SignaturePack for the autotune-aware shape: `args...` covers the
+// positional prefix, then `cfg.kwargs` values are appended (dispatched via
+// std::visit) as the trailing constexpr block.
+template <typename... Args>
+SignaturePack build_pack_with_config(const StaticSignature& static_sig,
+                                     const Config& cfg,
+                                     Args... args) {
+  const int num_args = static_sig.num_args;
+  SignaturePack pack;
+  pack.buffer.reserve(num_args);
+  c10::SmallVector<std::string> signature;
+  signature.reserve(num_args);
+  ArgHandle handler = {static_sig, pack.buffer, signature, 0};
+  (handler.handle_arg(args), ...);
+  for (const auto& kv : cfg.kwargs) {
+    std::visit([&](auto&& v) { handler.handle_arg(v); }, kv.second);
+  }
+#if !defined(BACKEND_NPU)
+  handler.append_global_scratch();
+  handler.append_global_scratch();
+#endif
+  pack.full_signature = join_sig(signature);
+  return pack;
+}
+
 template <BackendPolicy Backend>
 class TritonJITFunctionImpl {
  private:
@@ -252,6 +307,14 @@ class TritonJITFunctionImpl {
     return this->static_sig_;
   }
 
+  const std::string& get_file_path() const {
+    return this->file_path_;
+  }
+
+  const std::string& get_function_name() const {
+    return this->function_name_;
+  }
+
   template <typename... Args>
   void operator()(typename Backend::StreamType stream,
                   unsigned int grid_x,
@@ -260,43 +323,53 @@ class TritonJITFunctionImpl {
                   unsigned int num_warps,
                   unsigned int num_stages,
                   Args... args) const {
-    const int num_args = this->static_sig_.num_args;
+    SignaturePack pack = build_pack(this->static_sig_, args...);
 
-    // Storage for argument processing using ParameterBuffer
-    ParameterBuffer buffer;
-    buffer.reserve(num_args);  // this is a coarse estimation of parameter size
-    c10::SmallVector<std::string> signature;
-    signature.reserve(num_args);
-
-    // Process arguments
-    ArgHandle handler = {this->static_sig_, buffer, signature, 0};
-    (handler.handle_arg(args), ...);
-
-#if !defined(BACKEND_NPU)
-    // global scratch: introduced in triton 3.3
-    // NPU backend does not use global scratch (handled differently via workspace)
-    handler.append_global_scratch();
-    handler.append_global_scratch();
-#endif
-    std::string full_signature = join_sig(signature);
-
-    // Backend-specific context setup
     Backend::ensure_context();
     int device_index = Backend::get_device_index();
 
-    // Get or compile kernel
     const TritonKernelImpl<Backend>& kernel =
-        this->get_kernel(full_signature, num_warps, num_stages, device_index);
+        this->get_kernel(pack.full_signature, num_warps, num_stages, device_index);
 
-    // Launch kernel with signature (for NPU backend to parse argument types)
-    c10::SmallVector<void*> ptrs = buffer.get_ptrs();
+    c10::SmallVector<void*> ptrs = pack.buffer.get_ptrs();
     kernel.launch_with_signature(grid_x,
                                  grid_y,
                                  grid_z,
                                  num_warps,
                                  stream,
                                  ptrs.data(),
-                                 full_signature,
+                                 pack.full_signature,
+                                 ptrs.size());
+  }
+
+  // Autotune-aware launch entry point. Mirrors `operator()` but takes the
+  // tuned launch params (num_warps/num_stages) and any tuned constexpr
+  // values in `cfg.kwargs`. The kwargs are appended after `args...` and
+  // dispatched through ArgHandle, so the kernel must list them positionally
+  // at the end of its parameter list (matches Triton convention).
+  template <typename... Args>
+  void autotuned_call(typename Backend::StreamType stream,
+                      unsigned int grid_x,
+                      unsigned int grid_y,
+                      unsigned int grid_z,
+                      const Config& cfg,
+                      Args... args) const {
+    SignaturePack pack = build_pack_with_config(this->static_sig_, cfg, args...);
+
+    Backend::ensure_context();
+    int device_index = Backend::get_device_index();
+
+    const TritonKernelImpl<Backend>& kernel =
+        this->get_kernel(pack.full_signature, cfg.num_warps, cfg.num_stages, device_index);
+
+    c10::SmallVector<void*> ptrs = pack.buffer.get_ptrs();
+    kernel.launch_with_signature(grid_x,
+                                 grid_y,
+                                 grid_z,
+                                 cfg.num_warps,
+                                 stream,
+                                 ptrs.data(),
+                                 pack.full_signature,
                                  ptrs.size());
   }
 
