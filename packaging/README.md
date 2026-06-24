@@ -41,11 +41,11 @@ docker build --build-arg BASE_IMAGE=nvidia/cuda:12.4.0-devel-rockylinux8 -f Dock
 
 ## Package Contents
 
-### libtriton-jit (Runtime Package)
+### libtriton-jit-nvidia (Runtime Package)
 - `/usr/lib/*/libtriton_jit.so.*` - Shared library
 - `/usr/share/triton_jit/scripts/*.py` - Python helper scripts
 
-### libtriton-jit-dev (Development Package)
+### libtriton-jit-nvidia-dev (Development Package)
 - `/usr/include/triton_jit/` - Header files
 - `/usr/lib/*/libtriton_jit.so` - Development symlink
 - `/usr/lib/*/cmake/TritonJIT/` - CMake configuration files
