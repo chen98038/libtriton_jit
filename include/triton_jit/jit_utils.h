@@ -17,6 +17,8 @@
 #elif defined(BACKEND_MACA)
 #include <mcr/mc_runtime.h>
 #elif defined(BACKEND_GCU)
+#elif defined(BACKEND_HCU)
+#include <hip/hip_runtime.h>
 #else
 #include "cuda.h"
 #endif
@@ -169,6 +171,21 @@ inline void __checkMacaErrors(mcError_t code, const char* file, const int line) 
 }
 #elif defined(BACKEND_GCU)
 // GCU error handling is done inline in gcu_backend.h
+#elif defined(BACKEND_HCU)
+#define checkHcuErrors(err) __checkHcuErrors(err, __FILE__, __LINE__)
+
+inline void __checkHcuErrors(hipError_t code, const char* file, const int line) {
+  if (code != hipSuccess) {
+    const char* error_string = hipGetErrorString(code);
+    fprintf(stderr,
+            "HCU Runtime API error = %04d from file <%s>, line %i. Detail: <%s>\n",
+            static_cast<int>(code),
+            file,
+            line,
+            error_string);
+    throw std::runtime_error(error_string);
+  }
+}
 #else
 void ensure_cuda_context();
 

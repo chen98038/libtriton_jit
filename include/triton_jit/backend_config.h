@@ -10,6 +10,8 @@
 #include "triton_jit/backends/ix_backend.h"
 #elif defined(BACKEND_GCU)
 #include "triton_jit/backends/gcu_backend.h"
+#elif defined(BACKEND_HCU)
+#include "triton_jit/backends/hcu_backend.h"
 #else
 #include "triton_jit/backends/cuda_backend.h"
 #endif
@@ -39,6 +41,10 @@ using DefaultBackend = IxBackend;
 #elif defined(BACKEND_GCU)
 /// Default backend for GCU (Enflame)
 using DefaultBackend = GcuBackend;
+
+#elif defined(BACKEND_HCU)
+/// Default backend for HCU (Hygon, HIP-compatible)
+using DefaultBackend = HcuBackend;
 
 #else
 // Default to CUDA if no backend specified

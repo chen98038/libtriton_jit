@@ -28,6 +28,10 @@ elseif(BACKEND STREQUAL "GCU")
     target_link_libraries(triton_jit
       PUBLIC Torch::Torch GCU::efrt fmt::fmt-header-only
       PRIVATE pybind11::embed)
+elseif(BACKEND STREQUAL "HCU")
+    target_link_libraries(triton_jit
+      PUBLIC Torch::Torch hip::host fmt::fmt-header-only
+      PRIVATE pybind11::embed)
 else()
     target_link_libraries(triton_jit
       PUBLIC Torch::Torch CUDA::cuda_driver fmt::fmt-header-only

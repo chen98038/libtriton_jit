@@ -81,6 +81,26 @@ NpuKernelMetadata load_npu_metadata(const std::string& dir, const std::string& k
   return meta;
 }
 
+HcuKernelMetadata load_hcu_metadata(const std::string& dir, const std::string& kernel_name) {
+  std::string path = fmt::format("{}/{}.json", dir, kernel_name);
+  std::ifstream f(path);
+  HcuKernelMetadata meta;
+  if (!f.is_open()) {
+    return meta;
+  }
+
+  try {
+    nlohmann::json j = nlohmann::json::parse(f);
+    meta.shared = j.value("shared", 0u);
+    if (j.contains("target") && j["target"].contains("arch")) {
+      meta.arch = j["target"]["arch"].get<std::string>();
+    }
+  } catch (const nlohmann::json::exception& e) {
+    LOG(WARNING) << fmt::format("Failed to parse HCU metadata {}: {}", path, e.what());
+  }
+  return meta;
+}
+
 unsigned int load_shared_memory(const std::string& dir, const std::string& kernel_name) {
   std::string path = fmt::format("{}/{}.json", dir, kernel_name);
   std::ifstream f(path);

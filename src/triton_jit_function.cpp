@@ -151,3 +151,8 @@ struct GcuLibAutoInit {
 static GcuLibAutoInit gcu_lib_auto_init_;
 }  // namespace
 #endif
+
+#ifdef BACKEND_HCU
+#include "triton_jit/backends/hcu_backend.h"
+template class triton_jit::TritonJITFunctionImpl<triton_jit::HcuBackend>;
+#endif

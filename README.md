@@ -13,6 +13,7 @@ It supports multiple hardware backends through a compile-time backend policy des
 - **MUSA**: Moore Threads GPUs (warp size 32)
 - **NPU**: Ascend/Huawei (ACL API)
 - **IX**: Tianshu GPUs (warp size 64)
+- **HCU**: Hygon GPUs (warp size 64, HIP-compatible)
 
 The project aims to reduce the inevitable Python overhead when using Triton in Python code.
 For many kernels, the execution time of the kernel is much shorter than the CPU overhead.
@@ -225,7 +226,18 @@ export PATH=$CUCC_PATH/tools:$PATH
 export CUCC_CMAKE_ENTRY=2
 cmake_maca -S . -B build/ -DPython_ROOT="$(which python)/../.." -DBACKEND=MACA
 make_maca -C build/ -j2
+
+# HCU (Hygon)
+cmake -S . -B build/ -DPython_ROOT="$(which python)/../.." -DBACKEND=HCU
 ```
+
+On Ubuntu 22.04+ with DTK, if linking fails due to missing `librt.so`, create the stub once:
+
+```shell
+sudo ln -s /usr/lib/x86_64-linux-gnu/librt.so.1 /usr/lib/x86_64-linux-gnu/librt.so
+```
+
+Alternatively, pass `-DHCU_CREATE_LIBRT_STUB=ON` at configure time (requires write access to `/usr/lib`).
 
 You can also specify build type via `-DCMAKE_BUILD_TYPE` and the install prefix using `-DCMAKE_INSTALL_PREFIX`.
 
