@@ -1,7 +1,7 @@
 Source: libtriton-jit
 Section: libs
 Priority: optional
-Maintainer: FlagTree Project <contact@flagos.io>
+Maintainer: The FlagOS Contributors <contact@flagos.io>
 Build-Depends: debhelper-compat (= 13),
                cmake,
                ninja-build,
@@ -16,8 +16,8 @@ Rules-Requires-Root: no
 X-Build-Environment: This package is designed to be built in a CUDA container
  environment that provides the necessary SDK and Python packages:
  .
- - CUDA toolkit (>= 12.0) from nvidia/cuda base image
- - PyTorch (>= 2.5.0) and Triton (>= 3.1.0) via pip
+ - CUDA toolkit (>= 12.8) from nvidia/cuda base image
+ - PyTorch (>= 2.7.0) and Triton (>= 3.10.0) via pip
  - pybind11 via pip, nlohmann-json via system package
  - fmt 10.2.1 is downloaded via CMake FetchContent at build time
  .
