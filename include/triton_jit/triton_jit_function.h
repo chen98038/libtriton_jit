@@ -5,6 +5,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -147,6 +148,16 @@ struct ArgHandle {
       // Assumption: nullopt is always treated as constexpr,
       // even if the parameter is not marked as constexpr
       signature.push_back("nullopt");
+    } else if constexpr (std::is_same_v<std::decay_t<T>, const char*> ||
+                         std::is_same_v<std::decay_t<T>, char*> ||
+                         is_same_ignore_cvref<std::string, T>::value ||
+                         is_same_ignore_cvref<std::string_view, T>::value) {
+      // A string argument (e.g. a dtype spelled "tl.float32") can only ever be
+      // a constexpr Triton parameter. Route it to handle_constexpr at compile
+      // time so the specialized / non-constexpr paths -- which require
+      // triton_type<T>::name and do not specialize for strings -- are never
+      // instantiated for a string type.
+      handle_constexpr(item);
     } else {
       if (ssig.at(idx) == ArgType::CONSTEXPR) {  // constexpr
         handle_constexpr(item);

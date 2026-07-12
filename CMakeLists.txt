@@ -215,13 +215,15 @@ add_subdirectory(src)
 # ==============================================================================
 # Examples
 # ==============================================================================
-set(INSTALL_GTEST OFF)
-github_url(GTEST_URL "google/googletest/archive/refs/tags/v1.16.0.tar.gz")
-FetchContent_Declare(googletest URL ${GTEST_URL} DOWNLOAD_EXTRACT_TIMESTAMP ON)
-FetchContent_MakeAvailable(googletest)
-
 option(TRITON_JIT_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
 if(TRITON_JIT_BUILD_EXAMPLES)
+    # googletest is only needed by the examples; fetch it here so that
+    # subdirectory consumers (e.g. FlagGems via FetchContent) do not pull it in.
+    set(INSTALL_GTEST OFF)
+    github_url(GTEST_URL "google/googletest/archive/refs/tags/v1.16.0.tar.gz")
+    FetchContent_Declare(googletest URL ${GTEST_URL} DOWNLOAD_EXTRACT_TIMESTAMP ON)
+    FetchContent_MakeAvailable(googletest)
+
     add_subdirectory(examples)
 endif()
 
