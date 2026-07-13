@@ -95,7 +95,12 @@ namespace test {
       return -1;
     }
 
-    interpreter_ = std::make_unique<py::scoped_interpreter>();
+    // On GCU, torch_gcu / TOPS static init may already have initialized the
+    // embedded Python; creating a scoped_interpreter then throws
+    // "interpreter is already running". Only bootstrap one if needed.
+    if (!Py_IsInitialized()) {
+      interpreter_ = std::make_unique<py::scoped_interpreter>();
+    }
 
     try {
       py::module_::import("torch_gcu");
