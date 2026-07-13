@@ -194,7 +194,9 @@ endif()
 
 # --- fmtlib ---
 if(TRITON_JIT_USE_EXTERNAL_FMTLIB)
-    find_package(fmt 10.2.1 REQUIRED)
+    # Only fmt::format is used, so any fmt >= 8.1.1 works (the version
+    # shipped by Ubuntu 22.04), no need to require 10.2.1.
+    find_package(fmt 8.1.1 REQUIRED)
 else()
     github_url(FMT_URL "fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz")
     FetchContent_Declare(fmt URL ${FMT_URL} DOWNLOAD_EXTRACT_TIMESTAMP ON)
