@@ -62,3 +62,7 @@ cmake_install.cmake
 debug_*.sh
 auto_compare_*.py
 DEBUG_GUIDE.md
+# local build outputs
+output/
+debian-packages/
+rpm-packages/
