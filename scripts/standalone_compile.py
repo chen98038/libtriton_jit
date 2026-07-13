@@ -33,6 +33,11 @@ def get_backend():
     return os.environ.get("TRITON_JIT_BACKEND", "CUDA").upper()
 
 
+def get_backend():
+    """Get backend from environment variable (set by C++ at runtime)."""
+    return os.environ.get("TRITON_JIT_BACKEND", "CUDA").upper()
+
+
 # do not specifier a cache dir for libtriton jit now
 # pylint: disable-next=wrong-import-position
 triton_version = Version(triton.__version__)
@@ -273,7 +278,7 @@ def _compile_a_kernel(
                 "cls": "AttrsDescriptor",
             }
         )
-    elif triton_version.major == 3 and triton_version.minor == 3:
+    elif triton_version >= Version("3.3.0"):
         attrs = {(k,): [["tt.divisibility", 16]] for k, v in hints.items() if v == 16}
     elif triton_version.major == 3 and triton_version.minor == 4:
         attrs = {(k,): [["tt.divisibility", 16]] for k, v in hints.items() if v == 16}
@@ -356,6 +361,13 @@ def _compile_a_kernel(
         # NPU/MUSA/MTGPU/MACA/GCU: no CUDA device context manager
         target = triton.runtime.driver.active.get_current_target()
         ccinfo = triton.compile(src, target=target, options=opts)
+    elif backend in ["MLU"]:
+        target = triton.runtime.driver.active.get_current_target()
+        opts['is_linear_hint'] = True
+        opts['restrict_ptr_hint'] = True
+        mlu_backend = triton.compiler.make_backend(target)
+        opts = mlu_backend.parse_options(opts)
+        ccinfo = triton.compile(src, target=target, options=opts.__dict__)
     else:
         # CUDA / IX: use CUDA device context
         with torch.cuda.device(device_id):

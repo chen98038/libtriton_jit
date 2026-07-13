@@ -17,6 +17,7 @@ enum class NpuArgType : uint8_t {
 
 struct NpuArgInfo {
   NpuArgType type;
+  size_t size;
 
   static size_t get_size(NpuArgType t) {
     switch (t) {

@@ -58,17 +58,23 @@ NpuKernelMetadata load_npu_metadata(const std::string& dir, const std::string& k
         NpuArgInfo info;
         if (type_str == "ptr" || type_str == "pointer") {
           info.type = NpuArgType::POINTER;
+          info.size = sizeof(void*);
         } else if (type_str == "i64" || type_str == "u64") {
           info.type = NpuArgType::I64;
+          info.size = sizeof(int64_t);
         } else if (type_str == "i32" || type_str == "u32") {
           info.type = NpuArgType::I32;
+          info.size = sizeof(int32_t);
         } else if (type_str == "fp64" || type_str == "f64") {
           info.type = NpuArgType::F64;
+          info.size = sizeof(double);
         } else if (type_str == "fp32" || type_str == "f32") {
           info.type = NpuArgType::F32;
+          info.size = sizeof(float);
         } else {
           LOG(WARNING) << "Unknown arg type in metadata: " << type_str;
           info.type = NpuArgType::I64;
+          info.size = sizeof(int64_t);
         }
         meta.arg_layout.push_back(info);
       }
@@ -97,6 +103,23 @@ HcuKernelMetadata load_hcu_metadata(const std::string& dir, const std::string& k
     }
   } catch (const nlohmann::json::exception& e) {
     LOG(WARNING) << fmt::format("Failed to parse HCU metadata {}: {}", path, e.what());
+  }
+  return meta;
+}
+
+MluKernelMetadata load_mlu_metadata(const std::string& dir, const std::string& kernel_name) {
+  std::string path = fmt::format("{}/{}.json", dir, kernel_name);
+  std::ifstream f(path);
+  MluKernelMetadata meta;
+  if (!f.is_open()) {
+    return meta;
+  }
+  nlohmann::json j = nlohmann::json::parse(f);
+  meta.shared = j.value("shared", 0u);
+  meta.num_warps = j.value("num_warps", 1);
+  meta.promote_shared = j.value("promote_shared", false);
+  if (j.contains("target") && j["target"].contains("arch")) {
+    meta.arch = j["target"]["arch"].get<unsigned int>();
   }
   return meta;
 }

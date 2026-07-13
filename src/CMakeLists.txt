@@ -24,6 +24,10 @@ elseif(BACKEND STREQUAL "MACA")
     target_link_libraries(triton_jit
       PUBLIC Torch::Torch MACA::mcruntime fmt::fmt-header-only
       PRIVATE pybind11::embed)
+elseif(BACKEND STREQUAL "MLU")
+    target_link_libraries(triton_jit
+      PUBLIC Torch::Torch MLU::mlu_runtime fmt::fmt-header-only
+      PRIVATE pybind11::embed)
 elseif(BACKEND STREQUAL "GCU")
     target_link_libraries(triton_jit
       PUBLIC Torch::Torch GCU::efrt fmt::fmt-header-only
