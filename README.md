@@ -1,5 +1,9 @@
 # Triton JIT C++ runtime
 
+> [!IMPORTANT]
+> **The `multi-backend` branch is frozen.** It has been merged into `master` (#35) and is now read-only — no further contributions are accepted there.
+> **All future development must target `master`.** Please branch from and open pull requests against `master`.
+
 ## Introduction
 
 The `libtriton_jit` project is a multi-backend C++ runtime for Triton JIT functions.
