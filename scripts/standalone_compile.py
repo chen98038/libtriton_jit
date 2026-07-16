@@ -33,11 +33,6 @@ def get_backend():
     return os.environ.get("TRITON_JIT_BACKEND", "CUDA").upper()
 
 
-def get_backend():
-    """Get backend from environment variable (set by C++ at runtime)."""
-    return os.environ.get("TRITON_JIT_BACKEND", "CUDA").upper()
-
-
 # do not specifier a cache dir for libtriton jit now
 # pylint: disable-next=wrong-import-position
 triton_version = Version(triton.__version__)
