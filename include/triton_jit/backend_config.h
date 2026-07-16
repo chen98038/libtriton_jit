@@ -8,6 +8,8 @@
 #include "triton_jit/backends/maca_backend.h"
 #elif defined(BACKEND_IX)
 #include "triton_jit/backends/ix_backend.h"
+#elif defined(BACKEND_MLU)
+#include "triton_jit/backends/mlu_backend.h"
 #elif defined(BACKEND_GCU)
 #include "triton_jit/backends/gcu_backend.h"
 #elif defined(BACKEND_HCU)
@@ -29,6 +31,10 @@ using DefaultBackend = MusaBackend;
 #elif defined(BACKEND_MACA)
 /// Default backend for MACA (MetaX)
 using DefaultBackend = MacaBackend;
+
+#elif defined(BACKEND_MLU)
+/// Default backend for MLU (Cambricon)
+using DefaultBackend = MluBackend;
 
 #elif defined(BACKEND_CUDA)
 /// Default backend for CUDA

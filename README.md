@@ -13,6 +13,9 @@ It supports multiple hardware backends through a compile-time backend policy des
 - **MUSA**: Moore Threads GPUs (warp size 32)
 - **NPU**: Ascend/Huawei (ACL API)
 - **IX**: Tianshu GPUs (warp size 64)
+- **MACA**: MetaX GPUs
+- **MLU**: Cambricon MLUs (warp size 1 or 4)
+- **GCU**: Enflame GCUs
 - **HCU**: Hygon GPUs (warp size 64, HIP-compatible)
 
 The project aims to reduce the inevitable Python overhead when using Triton in Python code.
@@ -227,6 +230,9 @@ export CUCC_CMAKE_ENTRY=2
 cmake_maca -S . -B build/ -DPython_ROOT="$(which python)/../.." -DBACKEND=MACA
 make_maca -C build/ -j2
 
+# MLU (Cambricon)
+cmake -S . -B build/ -DPython_ROOT="$(which python)/../.." -DBACKEND=MLU
+
 # HCU (Hygon)
 cmake -S . -B build/ -DPython_ROOT="$(which python)/../.." -DBACKEND=HCU
 ```
@@ -273,7 +279,7 @@ For example, `export TORCH_CPP_LOG_LEVEL=INFO`.
 
 ## Roadmap
 
-- ~~Support more backends~~ ✓ (CUDA, MUSA, NPU, IX supported)
+- ~~Support more backends~~ ✓ (CUDA, MUSA, NPU, IX, MACA, MLU, GCU, HCU supported)
 - Better argument processing
 
   - copy arguments to a buffer to ensure their lifetime;

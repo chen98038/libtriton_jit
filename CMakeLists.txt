@@ -3,11 +3,11 @@ cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 # ==============================================================================
 # Backend Selection (must be before project())
 # ==============================================================================
-set(BACKEND "CUDA" CACHE STRING "Target backend: CUDA, IX, MUSA, MACA, NPU, GCU, or HCU")
-set_property(CACHE BACKEND PROPERTY STRINGS "CUDA" "IX" "MUSA" "MACA" "NPU" "GCU" "HCU")
+set(BACKEND "CUDA" CACHE STRING "Target backend: CUDA, IX, MUSA, MACA, MLU, NPU, GCU, or HCU")
+set_property(CACHE BACKEND PROPERTY STRINGS "CUDA" "IX" "MUSA" "MACA" "MLU" "NPU" "GCU" "HCU")
 
-if(NOT BACKEND MATCHES "^(CUDA|IX|MUSA|MACA|NPU|GCU|HCU)$")
-    message(FATAL_ERROR "Invalid BACKEND: ${BACKEND}. Must be CUDA, IX, MUSA, MACA, NPU, GCU, or HCU")
+if(NOT BACKEND MATCHES "^(CUDA|IX|MUSA|MACA|MLU|NPU|GCU|HCU)$")
+    message(FATAL_ERROR "Invalid BACKEND: ${BACKEND}. Must be CUDA, IX, MUSA, MACA, MLU, NPU, GCU, or HCU")
 endif()
 message(STATUS "Building with backend: ${BACKEND}")
 
@@ -24,12 +24,14 @@ if(BACKEND STREQUAL "MACA")
     set(USE_MACA ON)
 endif()
 
-# Project definition (NPU, MUSA, MACA, GCU, and HCU don't need CUDA language)
+# Project definition (NPU, MUSA, MACA, MLU, GCU, and HCU don't need CUDA language)
 if(BACKEND STREQUAL "NPU")
     project(TritonJIT LANGUAGES CXX VERSION 0.1.0)
 elseif(BACKEND STREQUAL "MUSA")
     project(TritonJIT LANGUAGES CXX VERSION 0.1.0)
 elseif(BACKEND STREQUAL "MACA")
+    project(TritonJIT LANGUAGES CXX VERSION 0.1.0)
+elseif(BACKEND STREQUAL "MLU")
     project(TritonJIT LANGUAGES CXX VERSION 0.1.0)
 elseif(BACKEND STREQUAL "GCU")
     project(TritonJIT LANGUAGES CXX VERSION 0.1.0)
@@ -54,6 +56,8 @@ elseif(BACKEND STREQUAL "MUSA")
     add_compile_definitions(BACKEND_MUSA)
 elseif(BACKEND STREQUAL "MACA")
     add_compile_definitions(BACKEND_MACA USE_MACA)
+elseif(BACKEND STREQUAL "MLU")
+    add_compile_definitions(BACKEND_MLU)
 elseif(BACKEND STREQUAL "GCU")
     add_compile_definitions(BACKEND_GCU)
 elseif(BACKEND STREQUAL "HCU")
@@ -75,7 +79,7 @@ add_compile_definitions(BACKEND_NAME="${TRITON_BACKEND_NAME}")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-if(NOT (BACKEND STREQUAL "NPU" OR BACKEND STREQUAL "MUSA" OR BACKEND STREQUAL "GCU" OR BACKEND STREQUAL "HCU"))
+if(NOT (BACKEND STREQUAL "NPU" OR BACKEND STREQUAL "MUSA" OR BACKEND STREQUAL "MACA" OR BACKEND STREQUAL "MLU" OR BACKEND STREQUAL "GCU" OR BACKEND STREQUAL "HCU"))
     set(CMAKE_CUDA_STANDARD 17)
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -174,6 +178,8 @@ elseif(BACKEND STREQUAL "MUSA")
     include(BackendMUSA)
 elseif(BACKEND STREQUAL "MACA")
     include(BackendMACA)
+elseif(BACKEND STREQUAL "MLU")
+    include(BackendMLU)
 elseif(BACKEND STREQUAL "GCU")
     include(BackendGCU)
 elseif(BACKEND STREQUAL "HCU")
@@ -218,21 +224,24 @@ endif()
 # ==============================================================================
 # Subdirectories
 # ==============================================================================
+if(TRITON_JIT_INSTALL)
+    include(GNUInstallDirs)
+endif()
 add_subdirectory(src)
 
 # ==============================================================================
-# Examples
+# Operators with Test Framework
 # ==============================================================================
-option(TRITON_JIT_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
-if(TRITON_JIT_BUILD_EXAMPLES)
-    # googletest is only needed by the examples; fetch it here so that
-    # subdirectory consumers (e.g. FlagGems via FetchContent) do not pull it in.
+option(TRITON_JIT_BUILD_OPERATORS "Build operators with test framework" ${PROJECT_IS_TOP_LEVEL})
+if(TRITON_JIT_BUILD_OPERATORS)
+    # googletest is only needed by the operators' test framework; fetch it here
+    # so that subdirectory consumers (e.g. FlagGems via FetchContent) do not pull it in.
     set(INSTALL_GTEST OFF)
     github_url(GTEST_URL "google/googletest/archive/refs/tags/v1.16.0.tar.gz")
     FetchContent_Declare(googletest URL ${GTEST_URL} DOWNLOAD_EXTRACT_TIMESTAMP ON)
     FetchContent_MakeAvailable(googletest)
 
-    add_subdirectory(examples)
+    add_subdirectory(operators)
 endif()
 
 # ==============================================================================

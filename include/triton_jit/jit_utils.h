@@ -16,6 +16,8 @@
 #include <musa.h>
 #elif defined(BACKEND_MACA)
 #include <mcr/mc_runtime.h>
+#elif defined(BACKEND_MLU)
+#include <cn_api.h>
 #elif defined(BACKEND_GCU)
 #elif defined(BACKEND_HCU)
 #include <hip/hip_runtime.h>
@@ -116,6 +118,8 @@ DEFINE_TRITON_TYPE(uint64_t, "u64");
 DEFINE_TRITON_TYPE(float, "fp32");
 DEFINE_TRITON_TYPE(double, "fp64");
 DEFINE_TRITON_TYPE(std::nullptr_t, "*i8");
+DEFINE_TRITON_TYPE(const char*, "constexpr");
+DEFINE_TRITON_TYPE(std::string, "constexpr");
 
 #undef DEFINE_TRITON_TYPE
 
@@ -167,6 +171,22 @@ inline void __checkMacaErrors(mcError_t code, const char* file, const int line) 
             line,
             error_string);
     throw std::runtime_error(error_string ? error_string : "Unknown MACA error");
+  }
+}
+#elif defined(BACKEND_MLU)
+#define checkMluErrors(err) __checkMluErrors(err, __FILE__, __LINE__)
+
+// Error handling function using exceptions instead of exit()
+inline void __checkMluErrors(CNresult code, const char* file, const int line) {
+  if (code != CN_SUCCESS){
+    const char* error_string;
+    cnGetErrorString(code, &error_string);
+    fprintf(stderr, "MLU Driver API error = %04d from file <%s>, line %i. Detail: <%s>\n",
+        code,
+        file,
+        line,
+        error_string);
+    throw std::runtime_error(error_string);
   }
 }
 #elif defined(BACKEND_GCU)
