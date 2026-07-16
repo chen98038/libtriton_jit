@@ -150,26 +150,19 @@ inline std::vector<NpuArgInfo> parse_signature(const std::string& sig) {
 
     if (token[0] == '*') {
       info.type = NpuArgType::POINTER;
-      info.size = sizeof(void*);
     } else if (token.substr(0, 3) == "i64" || token.substr(0, 3) == "u64") {
       info.type = NpuArgType::I64;
-      info.size = sizeof(int64_t);
     } else if (token.substr(0, 3) == "i32" || token.substr(0, 3) == "u32") {
       info.type = NpuArgType::I32;
-      info.size = sizeof(int32_t);
     } else if (token.substr(0, 4) == "fp64" || token.substr(0, 3) == "f64") {
       info.type = NpuArgType::F64;
-      info.size = sizeof(double);
     } else if (token.substr(0, 4) == "fp32" || token.substr(0, 3) == "f32") {
       info.type = NpuArgType::F32;
-      info.size = sizeof(float);
     } else if (token.substr(0, 4) == "fp16" || token.substr(0, 3) == "f16" || token.substr(0, 4) == "bf16") {
       info.type = NpuArgType::F32;
-      info.size = sizeof(float);
     } else {
       LOG(WARNING) << "Unknown type in signature: " << token << ", defaulting to i64";
       info.type = NpuArgType::I64;
-      info.size = sizeof(int64_t);
     }
 
     layout.push_back(info);
