@@ -1,3 +1,5 @@
+// Copyright 2026, FlagOs Contributors.
+
 #pragma once
 
 #include <mutex>
