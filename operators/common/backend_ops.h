@@ -21,6 +21,8 @@
 #include "cnrt.h"
 #elif defined(BACKEND_GCU)
 #include "tops_runtime_api.h"
+#elif defined(BACKEND_HCU)
+#include "c10/hip/HIPStream.h"
 #else
 #include "c10/cuda/CUDAStream.h"
 #endif
@@ -36,6 +38,8 @@ using RawStream = musaStream_t;
 using RawStream = cnrtQueue_t;
 #elif defined(BACKEND_GCU)
 using RawStream = topsStream_t;
+#elif defined(BACKEND_HCU)
+using RawStream = hipStream_t;
 #else
 using RawStream = CUstream;
 #endif
@@ -54,6 +58,8 @@ inline RawStream get_device_stream([[maybe_unused]] const at::Tensor& t) {
   return nullptr;
 #elif defined(BACKEND_GCU)
   return nullptr;
+#elif defined(BACKEND_HCU)
+  return c10::hip::getCurrentHIPStream(t.device().index()).stream();
 #else
   return static_cast<CUstream>(c10::cuda::getCurrentCUDAStream(t.device().index()).stream());
 #endif

@@ -39,6 +39,9 @@ namespace py = pybind11;
 #include <pybind11/embed.h>
 namespace py = pybind11;
 #define DEVICE_TYPE at::DeviceType::PrivateUse1
+#elif defined(BACKEND_HCU)
+#include <hip/hip_runtime.h>
+#define DEVICE_TYPE at::DeviceType::CUDA
 #elif defined(BACKEND_IX)
 #include <cuda.h>
 #include <cuda_runtime.h>
