@@ -1,3 +1,23 @@
+// Copyright 2026 FlagOS Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 /**
  * @file test_framework.cpp
  * @brief Implementation of unified test framework for Triton JIT operators
@@ -112,6 +132,17 @@ namespace test {
     device_ = at::Device(at::DeviceType::PrivateUse1, device_id_);
     std::cout << "GCU device " << device_id_ << " initialized" << std::endl;
 
+#elif defined(BACKEND_HCU)
+    // Initialize HCU (HIP runtime; PyTorch exposes the device as CUDA)
+    hipError_t err = hipSetDevice(device_id_);
+    if (err != hipSuccess) {
+      std::cerr << "Failed to set HCU device: " << hipGetErrorString(err) << std::endl;
+      return -1;
+    }
+
+    device_ = at::Device(at::DeviceType::CUDA, device_id_);
+    std::cout << "HCU device " << device_id_ << " initialized" << std::endl;
+
 #elif defined(BACKEND_IX)
     // Initialize IX (uses CUDA API)
     cudaError_t err = cudaSetDevice(device_id_);
@@ -150,6 +181,8 @@ namespace test {
     cnrtSyncDevice();
 #elif defined(BACKEND_GCU)
     topsDeviceSynchronize();
+#elif defined(BACKEND_HCU)
+    hipDeviceSynchronize();
 #else  // CUDA or IX
     cudaDeviceSynchronize();
 #endif
@@ -164,6 +197,8 @@ namespace test {
     return "MLU";
 #elif defined(BACKEND_GCU)
     return "GCU";
+#elif defined(BACKEND_HCU)
+    return "HCU";
 #elif defined(BACKEND_IX)
     return "IX";
 #else
@@ -186,6 +221,8 @@ namespace test {
 #elif defined(BACKEND_GCU)
     interpreter_.reset();
     topsDeviceReset();
+#elif defined(BACKEND_HCU)
+    hipDeviceReset();
 #else  // CUDA or IX
     cudaDeviceReset();
 #endif

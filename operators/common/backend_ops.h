@@ -1,3 +1,23 @@
+// Copyright 2026 FlagOS Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #pragma once
 
 #include <stdexcept>
@@ -21,6 +41,8 @@
 #include "cnrt.h"
 #elif defined(BACKEND_GCU)
 #include "tops_runtime_api.h"
+#elif defined(BACKEND_HCU)
+#include "c10/hip/HIPStream.h"
 #else
 #include "c10/cuda/CUDAStream.h"
 #endif
@@ -36,6 +58,8 @@ using RawStream = musaStream_t;
 using RawStream = cnrtQueue_t;
 #elif defined(BACKEND_GCU)
 using RawStream = topsStream_t;
+#elif defined(BACKEND_HCU)
+using RawStream = hipStream_t;
 #else
 using RawStream = CUstream;
 #endif
@@ -54,6 +78,8 @@ inline RawStream get_device_stream([[maybe_unused]] const at::Tensor& t) {
   return nullptr;
 #elif defined(BACKEND_GCU)
   return nullptr;
+#elif defined(BACKEND_HCU)
+  return c10::hip::getCurrentHIPStream(t.device().index()).stream();
 #else
   return static_cast<CUstream>(c10::cuda::getCurrentCUDAStream(t.device().index()).stream());
 #endif
