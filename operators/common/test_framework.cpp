@@ -132,6 +132,17 @@ namespace test {
     device_ = at::Device(at::DeviceType::PrivateUse1, device_id_);
     std::cout << "GCU device " << device_id_ << " initialized" << std::endl;
 
+#elif defined(BACKEND_HCU)
+    // Initialize HCU (HIP runtime; PyTorch exposes the device as CUDA)
+    hipError_t err = hipSetDevice(device_id_);
+    if (err != hipSuccess) {
+      std::cerr << "Failed to set HCU device: " << hipGetErrorString(err) << std::endl;
+      return -1;
+    }
+
+    device_ = at::Device(at::DeviceType::CUDA, device_id_);
+    std::cout << "HCU device " << device_id_ << " initialized" << std::endl;
+
 #elif defined(BACKEND_IX)
     // Initialize IX (uses CUDA API)
     cudaError_t err = cudaSetDevice(device_id_);
@@ -170,6 +181,8 @@ namespace test {
     cnrtSyncDevice();
 #elif defined(BACKEND_GCU)
     topsDeviceSynchronize();
+#elif defined(BACKEND_HCU)
+    hipDeviceSynchronize();
 #else  // CUDA or IX
     cudaDeviceSynchronize();
 #endif
@@ -184,6 +197,8 @@ namespace test {
     return "MLU";
 #elif defined(BACKEND_GCU)
     return "GCU";
+#elif defined(BACKEND_HCU)
+    return "HCU";
 #elif defined(BACKEND_IX)
     return "IX";
 #else
@@ -206,6 +221,8 @@ namespace test {
 #elif defined(BACKEND_GCU)
     interpreter_.reset();
     topsDeviceReset();
+#elif defined(BACKEND_HCU)
+    hipDeviceReset();
 #else  // CUDA or IX
     cudaDeviceReset();
 #endif
