@@ -43,11 +43,22 @@ struct LaunchMetadata {
   int num_warps = 0;
   unsigned int shared_memory = 0;
   std::string signature;
+  // Null when Backend::StreamType is not pointer-representable.
   void* stream = nullptr;
 };
 
+// Hooks execute synchronously on the launching thread and may be invoked
+// concurrently by multiple launch threads. Callbacks are responsible for
+// synchronizing their own state.
+//
+// Exceptions propagate to the caller. If enter throws, the kernel is not
+// submitted. Exit runs only after Backend::launch_kernel returns successfully;
+// if exit throws, the kernel has already been submitted.
 using LaunchHook = std::function<void(const LaunchMetadata&)>;
 
+// Hook updates affect subsequent launches. An in-flight launch retains the
+// immutable enter/exit snapshot acquired before invoking enter, so a hook may
+// safely update or clear the process-wide hooks.
 void set_launch_enter_hook(LaunchHook hook);
 void set_launch_exit_hook(LaunchHook hook);
 void clear_launch_hooks();
