@@ -1,0 +1,3 @@
+add_executable(test_launch_hooks test_launch_hooks.cpp)
+target_link_libraries(test_launch_hooks PRIVATE TritonJIT::triton_jit)
+add_test(NAME launch_hooks COMMAND test_launch_hooks)

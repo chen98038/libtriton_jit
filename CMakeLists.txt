@@ -250,6 +250,14 @@ endif()
 add_subdirectory(src)
 
 # ==============================================================================
+# Unit Tests
+# ==============================================================================
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
+# ==============================================================================
 # Operators with Test Framework
 # ==============================================================================
 option(TRITON_JIT_BUILD_OPERATORS "Build operators with test framework" ${PROJECT_IS_TOP_LEVEL})
