@@ -236,12 +236,50 @@ def kernel_suffix(signature, specialization):
     return suffix
 
 
+def _coerce_opt(v):
+    """Coerce a string option value coming from the C++ CompileOptions.extra map into
+    the type triton.compile expects (int / float / bool), else keep it as a string.
+    C++ can only hand us strings, but options like num_ctas are ints and some are bools."""
+    if not isinstance(v, str):
+        return v
+    low = v.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    try:
+        return int(v)
+    except ValueError:
+        pass
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    return v
+
+
+def _merge_compile_options(
+    num_warps: int,
+    num_stages: int,
+    extra_options: dict = None,
+) -> dict:
+    """Build backend compile options without allowing extras to override core fields."""
+    extra_options = extra_options or {}
+    reserved = sorted({"num_warps", "num_stages"}.intersection(extra_options))
+    if reserved:
+        names = ", ".join(reserved)
+        raise ValueError(f"extra_options must not override reserved option(s): {names}")
+
+    opts = {"num_warps": num_warps, "num_stages": num_stages}
+    opts.update({_k: _coerce_opt(_v) for _k, _v in extra_options.items()})
+    return opts
+
+
 def _compile_a_kernel(
     fn: triton.runtime.JITFunction,
     signature: str,
     num_warps: int = 4,
     num_stages: int = 3,
     device_id: int = 0,
+    extra_options: dict = None,
 ) -> Tuple[str, str]:
     """compile a kernel."""
     # static signature
@@ -373,7 +411,10 @@ def _compile_a_kernel(
     # STEP1: JITFunction, constants, signature, specialization
 
     # STEP2: compile options for the backend
-    opts = {"num_warps": num_warps, "num_stages": num_stages}
+    # Merge backend-specific compiler switches threaded from C++ CompileOptions.extra
+    # (e.g. {"opt_level": "O2"} for MLU). They join `opts` before parse_options so the
+    # backend's own option validation sees them.
+    opts = _merge_compile_options(num_warps, num_stages, extra_options)
 
     # STEP3: ast source, target, compile options (backend-specific)
     backend = get_backend()
@@ -506,6 +547,7 @@ def compile_a_kernel(
     num_warps: int = 4,
     num_stages: int = 3,
     device_id: int = 0,
+    extra_options: dict = None,
 ):
     # get jit function
     source_path = Path(source_path)
@@ -518,7 +560,7 @@ def compile_a_kernel(
     while not (type(fn) is triton.runtime.JITFunction):
         fn = fn.fn
 
-    return _compile_a_kernel(fn, signature, num_warps, num_stages, device_id)
+    return _compile_a_kernel(fn, signature, num_warps, num_stages, device_id, extra_options)
 
 
 if __name__ == "__main__":

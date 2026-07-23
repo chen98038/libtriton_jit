@@ -94,14 +94,20 @@ TritonJITFunctionImpl<Backend>::TritonJITFunctionImpl(std::string_view path, std
 
 template <BackendPolicy Backend>
 const TritonKernelImpl<Backend>& TritonJITFunctionImpl<Backend>::get_kernel(std::string_view _signature,
-                                                                            int num_warps,
-                                                                            int num_stages,
+                                                                            const CompileOptions& opts,
                                                                             int device_index) const {
   std::string signature(_signature);
-  std::string key = fmt::format("{};{}", signature, device_index);
+  // The cache key must encode everything that changes the compiled artifact. The old
+  // key was just "{signature};{device_index}", so two launches that differed only in
+  // num_warps/num_stages/opt_level collided on the same cache entry and the second
+  // silently reused the first one's binary. Fold those compile options into the key.
+  std::string key = detail::make_kernel_cache_key(signature, device_index, opts);
 
   auto pos = this->overloads_.find(key);
   if (pos == this->overloads_.end()) {
+    if (std::getenv("LTJ_DUMP_KEY")) {
+      fmt::print(stderr, "[LTJ_CACHE_MISS] key={}\n", key);
+    }
     // Compile kernel via Python
     namespace py = pybind11;
     ensure_initialized();
@@ -114,7 +120,12 @@ const TritonKernelImpl<Backend>& TritonJITFunctionImpl<Backend>::get_kernel(std:
     py::object fn = mod.attr("compile_a_kernel");
     py::object ans;
     try {
-      ans = fn(this->file_path_, this->function_name_, signature, num_warps, num_stages, device_index);
+      py::dict extra_dict;
+      for (const auto& kv : opts.extra) {
+        extra_dict[py::str(kv.first)] = py::str(kv.second);
+      }
+      ans = fn(this->file_path_, this->function_name_, signature, opts.num_warps, opts.num_stages,
+               device_index, extra_dict);
     } catch (const py::error_already_set& e) {
       std::cerr << "Python exception: " << e.what() << std::endl;
       throw;
