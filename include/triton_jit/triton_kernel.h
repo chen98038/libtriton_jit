@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -30,6 +32,38 @@
 #include "triton_jit/jit_utils.h"
 
 namespace triton_jit {
+
+// Metadata available at the C++ runtime's kernel dispatch point. Hooks run
+// synchronously, but the strings are owned so callers may safely retain a copy.
+struct LaunchMetadata {
+  std::string kernel_name;
+  unsigned int grid_x = 0;
+  unsigned int grid_y = 0;
+  unsigned int grid_z = 0;
+  int num_warps = 0;
+  unsigned int shared_memory = 0;
+  std::string signature;
+  void* stream = nullptr;
+};
+
+using LaunchHook = std::function<void(const LaunchMetadata&)>;
+
+void set_launch_enter_hook(LaunchHook hook);
+void set_launch_exit_hook(LaunchHook hook);
+void clear_launch_hooks();
+
+namespace detail {
+
+struct LaunchHooksState {
+  LaunchHook enter;
+  LaunchHook exit;
+};
+
+using LaunchHooksSnapshot = std::shared_ptr<const LaunchHooksState>;
+
+LaunchHooksSnapshot get_launch_hooks_snapshot();
+
+}  // namespace detail
 
 // Forward declaration
 template <BackendPolicy Backend>
@@ -97,6 +131,27 @@ class TritonKernelImpl {
     // Prepare backend-specific launch options (no branching)
     auto opts = Backend::prepare_launch(dir_, kernel_name_, shared_memory, signature, num_args);
 
+    // Take one immutable snapshot for the whole launch. Updating or clearing the
+    // process-wide hooks from another thread (or from a hook itself) only affects
+    // subsequent launches.
+    detail::LaunchHooksSnapshot hooks = detail::get_launch_hooks_snapshot();
+    LaunchMetadata metadata;
+    if (hooks) {
+      metadata.kernel_name = kernel_name_;
+      metadata.grid_x = grid_x;
+      metadata.grid_y = grid_y;
+      metadata.grid_z = grid_z;
+      metadata.num_warps = num_warps;
+      metadata.shared_memory = shared_memory;
+      metadata.signature = signature;
+      if constexpr (std::is_pointer_v<typename Backend::StreamType>) {
+        metadata.stream = reinterpret_cast<void*>(stream);
+      }
+      if (hooks->enter) {
+        hooks->enter(metadata);
+      }
+    }
+
     // Launch kernel using backend policy (unified interface)
     Backend::launch_kernel(stream,
                            kernel_handle_,
@@ -108,6 +163,10 @@ class TritonKernelImpl {
                            block_z,
                            args,
                            opts);
+
+    if (hooks && hooks->exit) {
+      hooks->exit(metadata);
+    }
   }
 
   const std::string& get_dir() const {
