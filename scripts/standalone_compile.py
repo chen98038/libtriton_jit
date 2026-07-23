@@ -25,9 +25,9 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import List, Tuple, Union
 
-# NPU and MTGPU require this before importing triton
+# NPU, MTGPU, MACA, GCU, and MLU require this before importing triton
 backend_env = os.environ.get("TRITON_JIT_BACKEND", "").upper()
-if backend_env in ["NPU", "MTGPU", "MACA", "GCU"]:
+if backend_env in ["NPU", "MTGPU", "MACA", "GCU", "MLU"]:
     os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 
 import torch  # noqa: E402
@@ -43,6 +43,11 @@ elif backend_env == "GCU":
         import torch_gcu  # noqa: F401 - Activate GCU device and Triton enflame driver
     except ImportError:
         print("Warning: torch_gcu not available, GCU backend may not work")
+elif backend_env == "MLU":
+    try:
+        import torch_mlu  # noqa: F401 - Activate MLU device and Triton mlu driver
+    except ImportError:
+        print("Warning: torch_mlu not available, MLU backend may not work")
 
 import triton  # noqa: E402
 from packaging.version import Version  # noqa: E402
@@ -377,6 +382,24 @@ def _compile_a_kernel(
         target = triton.runtime.driver.active.get_current_target()
         ccinfo = triton.compile(src, target=target, options=opts)
     elif backend in ["MLU"]:
+        # torch_mlu only registers torch.mlu when initialization sees CPU.
+        # The embedded C++ runtime has already activated MLU, so re-run
+        # torch_mlu initialization while temporarily masking the accelerator.
+        if not hasattr(torch, "mlu"):
+            import sys as _sys
+
+            _orig_cur = torch.accelerator.current_accelerator
+            torch.accelerator.current_accelerator = lambda *args, **kwargs: None
+            try:
+                _sys.modules.pop("torch_mlu", None)
+                import torch_mlu  # noqa: F401
+            finally:
+                torch.accelerator.current_accelerator = _orig_cur
+            if not hasattr(torch, "mlu"):
+                raise RuntimeError(
+                    "failed to register torch.mlu for MLU triton driver"
+                )
+
         target = triton.runtime.driver.active.get_current_target()
         opts['is_linear_hint'] = True
         opts['restrict_ptr_hint'] = True
