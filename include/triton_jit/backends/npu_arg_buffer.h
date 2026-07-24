@@ -204,6 +204,10 @@ inline void append_signature_token(std::string token, std::vector<NpuArgInfo>& l
     return;
   }
 
+  if (token.starts_with("@jit:")) {
+    return;
+  }
+
   if (token == "nullopt" || token == "true" || token == "false") {
     return;
   }

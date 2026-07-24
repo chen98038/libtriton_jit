@@ -19,8 +19,13 @@
 # SOFTWARE.
 
 import importlib.util
+import io
 import json
+import linecache
 import os
+import re
+import sys
+import tokenize
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List, Tuple, Union
@@ -205,6 +210,109 @@ def _normalize_gcu_signature(value):
     return "fp32" if value == "fp64" else value
 
 
+def _fnv1a64(data: bytes) -> str:
+    """Return a stable, lowercase FNV-1a 64 fingerprint."""
+    value = 14695981039346656037
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+
+def _decode_jitfunction_field(value: str, field_name: str) -> str:
+    if not value or len(value) % 2 or re.fullmatch(r"[0-9a-fA-F]+", value) is None:
+        raise ValueError(f"invalid hex-encoded JITFunction {field_name}")
+    try:
+        decoded = bytes.fromhex(value).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"JITFunction {field_name} is not valid UTF-8") from error
+    if not decoded:
+        raise ValueError(f"JITFunction {field_name} must not be empty")
+    return decoded
+
+
+def _parse_jitfunction_token(token: str) -> Tuple[str, str, str]:
+    """Parse @jit:<hex-path>:<hex-name>:<source-fingerprint>."""
+    fields = token.split(":")
+    if len(fields) != 4 or fields[0] != "@jit":
+        raise ValueError(f"invalid JITFunction token: {token}")
+
+    path = _decode_jitfunction_field(fields[1], "module path")
+    name = _decode_jitfunction_field(fields[2], "function name")
+    fingerprint = fields[3]
+    if re.fullmatch(r"[0-9a-f]{16}", fingerprint) is None:
+        raise ValueError("JITFunction fingerprint must be 16 lowercase hex characters")
+    if not Path(path).is_absolute():
+        raise ValueError("JITFunction module path must be absolute")
+    return path, name, fingerprint
+
+
+def _unwrap_jitfunction(value, description: str):
+    seen = set()
+    current = value
+    for _ in range(32):
+        if isinstance(current, triton.runtime.JITFunction):
+            return current
+        identity = id(current)
+        if identity in seen:
+            raise TypeError(f"cycle while unwrapping {description}")
+        seen.add(identity)
+        if not hasattr(current, "fn"):
+            raise TypeError(f"{description} does not resolve to a Triton JITFunction")
+        current = current.fn
+    raise TypeError(f"wrapper depth exceeded while unwrapping {description}")
+
+
+def _load_jitfunction(path: str, name: str, fingerprint: str):
+    """Validate a source snapshot and resolve one Triton JITFunction."""
+    source_path = Path(path)
+    source = source_path.read_bytes()
+    actual_fingerprint = _fnv1a64(source)
+    if actual_fingerprint != fingerprint:
+        raise ValueError(
+            "JITFunction source changed after the C++ argument was constructed: "
+            f"expected {fingerprint}, got {actual_fingerprint}"
+        )
+
+    module_name = (
+        f"_triton_jit_callee_{fingerprint}_{_fnv1a64(str(source_path).encode('utf-8'))}"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, source_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load JITFunction module: {source_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        # Execute the exact bytes whose fingerprint was validated above.
+        # SourceFileLoader may otherwise reuse a same-timestamp, same-size .pyc
+        # after an in-place source edit, disconnecting the cache key from code.
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(source).readline)
+        source_text = source.decode(encoding)
+        linecache.cache[str(source_path)] = (
+            len(source),
+            None,
+            source_text.splitlines(keepends=True),
+            str(source_path),
+        )
+        code = compile(source, str(source_path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+
+    value = getattr(module, name)
+    return _unwrap_jitfunction(value, f"{source_path}:{name}")
+
+
+def _resolve_jitfunction_constants(signature: List[str]) -> dict:
+    resolved = {}
+    for index, token in enumerate(signature):
+        if token.startswith("@jit:"):
+            path, name, fingerprint = _parse_jitfunction_token(token)
+            resolved[index] = _load_jitfunction(path, name, fingerprint)
+    return resolved
+
+
 def generate_arg_layout(
     signature: List[str], constexpr_indices: List[int]
 ) -> List[dict]:
@@ -221,7 +329,7 @@ def generate_arg_layout(
 
     for i, sig in enumerate(signature):
         # Check if this is a constexpr by index or by value
-        if i in constexpr_indices:
+        if i in constexpr_indices or sig.startswith("@jit:"):
             continue
 
         # Try to parse as constexpr value
@@ -361,12 +469,15 @@ def _compile_a_kernel(
         fn.params
     ), f"number of argument mismatch:  Actual({num_args}), Function Definition({len(fn.params)})"
 
-    constants = {
-        i: constexpr(s) for i, s in enumerate(signature) if i in constexpr_indices
-    }
-    assert len(constants) == len(
-        constexpr_indices
-    ), f"number of constexpr mismatch:  Actual({len(constants)}), Function Definition({len(constexpr_indices)})"
+    constants = _resolve_jitfunction_constants(signature)
+    for i, token in enumerate(signature):
+        if i in constexpr_indices and i not in constants:
+            constants[i] = constexpr(token)
+    missing_constexpr = [i for i in constexpr_indices if i not in constants]
+    assert not missing_constexpr, (
+        "number of constexpr mismatch: "
+        f"missing parameter indices {missing_constexpr}"
+    )
 
     # signature, no specializations here
     signature_without_spec = {
@@ -376,7 +487,11 @@ def _compile_a_kernel(
     }
 
     # specialization: divisibility by 16 or equal to 1
-    hints = {i: constexpr(s.split(":")[1]) for i, s in enumerate(signature) if ":" in s}
+    hints = {
+        i: constexpr(s.rsplit(":", 1)[1])
+        for i, s in enumerate(signature)
+        if i not in constants and ":" in s
+    }
     hints = {k: v for k, v in hints.items() if v is not None}
     for h in hints.values():
         assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
