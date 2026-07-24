@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -102,6 +103,18 @@ struct StaticSignature {
   }
 };
 
+template <typename T>
+struct is_std_tuple : std::false_type {};
+
+template <typename... Ts>
+struct is_std_tuple<std::tuple<Ts...>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_runtime_tuple_element_v =
+    is_same_ignore_cvref<int, T>::value || is_same_ignore_cvref<unsigned int, T>::value ||
+    is_same_ignore_cvref<int64_t, T>::value || is_same_ignore_cvref<uint64_t, T>::value ||
+    is_same_ignore_cvref<float, T>::value || is_same_ignore_cvref<double, T>::value;
+
 struct ArgHandle {
   const StaticSignature& ssig;
   /* data pointer of Tensors;
@@ -123,9 +136,36 @@ struct ArgHandle {
       handle_optional(item);
     } else if constexpr (is_same_ignore_cvref<c10::Scalar, T>::value) {
       handle_scalar(item);
+    } else if constexpr (is_std_tuple<std::remove_cvref_t<T>>::value) {
+      handle_tuple(item);
     } else {
       handle_arg_plain(item);
     }
+  }
+
+  template <typename... Ts>
+  void handle_tuple(const std::tuple<Ts...>& item) {
+    static_assert(sizeof...(Ts) > 0, "Runtime tuple arguments must not be empty");
+    static_assert((is_runtime_tuple_element_v<Ts> && ...),
+                  "Runtime tuple arguments contain an unsupported scalar type");
+    TORCH_CHECK(this->ssig.at(idx) != ArgType::CONSTEXPR,
+                "Runtime tuple arguments cannot be constexpr");
+
+    std::string grouped_signature = "(";
+    bool first = true;
+    auto append_element = [&](const auto& element) {
+      if (!first) {
+        grouped_signature += ",";
+      }
+      first = false;
+      this->buf.push_arg(element);
+      grouped_signature += triton_type<std::remove_cvref_t<decltype(element)>>::name;
+    };
+    std::apply([&](const auto&... elements) { (append_element(elements), ...); }, item);
+    grouped_signature += ")";
+
+    signature.push_back(std::move(grouped_signature));
+    idx++;
   }
 
   template <typename T>
