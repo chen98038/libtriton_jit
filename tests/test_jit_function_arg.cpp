@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -43,6 +44,44 @@ bool is_lower_hex(std::string_view value) {
          std::all_of(value.begin(), value.end(),
                      [](char ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'); });
 }
+
+class TemporaryDirectory {
+ public:
+  TemporaryDirectory() {
+    const auto base = std::filesystem::temp_directory_path();
+    std::random_device random;
+    for (int attempt = 0; attempt < 128; ++attempt) {
+      auto candidate =
+          base / ("libtriton_jit_function_arg_test-" + std::to_string(random()) + "-" +
+                  std::to_string(random()));
+      std::error_code error;
+      if (std::filesystem::create_directory(candidate, error)) {
+        path_ = std::move(candidate);
+        return;
+      }
+      if (error && error != std::errc::file_exists) {
+        throw std::filesystem::filesystem_error(
+            "Failed to create temporary test directory", candidate, error);
+      }
+    }
+    throw std::runtime_error("Failed to create a unique temporary test directory");
+  }
+
+  ~TemporaryDirectory() {
+    std::error_code error;
+    std::filesystem::remove_all(path_, error);
+  }
+
+  TemporaryDirectory(const TemporaryDirectory&) = delete;
+  TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
+
+  const std::filesystem::path& path() const noexcept {
+    return path_;
+  }
+
+ private:
+  std::filesystem::path path_;
+};
 
 template <typename Exception, typename Fn>
 bool expect_throws(Fn&& fn, const char* message) {
@@ -108,8 +147,8 @@ int main() {
                  "NPU layout must preserve the following runtime argument");
   }
 
-  const auto temporary =
-      std::filesystem::temp_directory_path() / "libtriton_jit_function_arg_test.py";
+  TemporaryDirectory temporary_directory;
+  const auto temporary = temporary_directory.path() / "module.py";
   {
     std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
     output << "value = 1\n";
@@ -122,7 +161,6 @@ int main() {
     output << "value = 2\n";
   }
   JitFunctionArg second_snapshot{temporary.string(), "mul_func"};
-  std::filesystem::remove(temporary);
   ok &= expect(first_snapshot.signature_token() != second_snapshot.signature_token(),
                "changed source must produce a different token");
 

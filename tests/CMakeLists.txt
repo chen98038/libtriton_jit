@@ -32,4 +32,5 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/test_standalone_jit_function.py
         ${PROJECT_SOURCE_DIR}/scripts/standalone_compile.py
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/jit_function_module.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/jit_function_compile_module.py
 )

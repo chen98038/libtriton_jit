@@ -281,6 +281,10 @@ def _load_jitfunction(path: str, name: str, fingerprint: str):
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load JITFunction module: {source_path}")
     module = importlib.util.module_from_spec(spec)
+    linecache_key = str(source_path)
+    missing = object()
+    previous_module = sys.modules.get(module_name, missing)
+    previous_linecache = linecache.cache.get(linecache_key, missing)
     sys.modules[module_name] = module
     try:
         # Execute the exact bytes whose fingerprint was validated above.
@@ -288,20 +292,26 @@ def _load_jitfunction(path: str, name: str, fingerprint: str):
         # after an in-place source edit, disconnecting the cache key from code.
         encoding, _ = tokenize.detect_encoding(io.BytesIO(source).readline)
         source_text = source.decode(encoding)
-        linecache.cache[str(source_path)] = (
+        linecache.cache[linecache_key] = (
             len(source),
             None,
             source_text.splitlines(keepends=True),
-            str(source_path),
+            linecache_key,
         )
-        code = compile(source, str(source_path), "exec")
+        code = compile(source, linecache_key, "exec")
         exec(code, module.__dict__)
+        value = getattr(module, name)
+        return _unwrap_jitfunction(value, f"{source_path}:{name}")
     except Exception:
-        sys.modules.pop(module_name, None)
+        if previous_module is missing:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous_module
+        if previous_linecache is missing:
+            linecache.cache.pop(linecache_key, None)
+        else:
+            linecache.cache[linecache_key] = previous_linecache
         raise
-
-    value = getattr(module, name)
-    return _unwrap_jitfunction(value, f"{source_path}:{name}")
 
 
 def _resolve_jitfunction_constants(signature: List[str]) -> dict:

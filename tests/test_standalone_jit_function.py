@@ -19,6 +19,8 @@
 # SOFTWARE.
 
 import importlib.util
+import linecache
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -47,6 +49,35 @@ def make_token(module, source_path, function_name):
         f"@jit:{str(source_path.resolve()).encode().hex()}:"
         f"{function_name.encode().hex()}:{module._fnv1a64(source)}"
     )
+
+
+def module_name_for(module, source_path, fingerprint):
+    return (
+        f"_triton_jit_callee_{fingerprint}_"
+        f"{module._fnv1a64(str(source_path).encode('utf-8'))}"
+    )
+
+
+def expect_failed_load_restores_registries(
+    module, source_path, function_name, fingerprint, exception_type
+):
+    module_name = module_name_for(module, source_path, fingerprint)
+    linecache_key = str(source_path)
+    missing = object()
+    previous_module = sys.modules.get(module_name, missing)
+    previous_linecache = linecache.cache.get(linecache_key, missing)
+
+    expect_exception(
+        exception_type,
+        lambda: module._load_jitfunction(
+            str(source_path), function_name, fingerprint
+        ),
+    )
+
+    restored_module = sys.modules.get(module_name, missing)
+    restored_linecache = linecache.cache.get(linecache_key, missing)
+    assert restored_module is previous_module
+    assert restored_linecache is previous_linecache
 
 
 def main():
@@ -87,13 +118,19 @@ def main():
         ValueError,
         lambda: module._load_jitfunction(path, name, "0000000000000000"),
     )
-    expect_exception(
+    expect_failed_load_restores_registries(
+        module,
+        fixture,
+        "missing_function",
+        fingerprint,
         AttributeError,
-        lambda: module._load_jitfunction(path, "missing_function", fingerprint),
     )
-    expect_exception(
+    expect_failed_load_restores_registries(
+        module,
+        fixture,
+        "not_a_jit_function",
+        fingerprint,
         TypeError,
-        lambda: module._load_jitfunction(path, "not_a_jit_function", fingerprint),
     )
 
     with tempfile.TemporaryDirectory() as directory:
@@ -129,12 +166,42 @@ def main():
             encoding="utf-8",
         )
         cycle_fingerprint = module._fnv1a64(cycle_path.read_bytes())
-        expect_exception(
+        expect_failed_load_restores_registries(
+            module,
+            cycle_path,
+            "cycle",
+            cycle_fingerprint,
             TypeError,
-            lambda: module._load_jitfunction(
-                str(cycle_path), "cycle", cycle_fingerprint
-            ),
         )
+
+        broken_path = Path(directory) / "broken.py"
+        broken_path.write_text(
+            "raise RuntimeError('module execution failed')\n",
+            encoding="utf-8",
+        )
+        broken_fingerprint = module._fnv1a64(broken_path.read_bytes())
+        expect_failed_load_restores_registries(
+            module,
+            broken_path,
+            "operation",
+            broken_fingerprint,
+            RuntimeError,
+        )
+
+    if os.environ.get("TRITON_JIT_TEST_COMPILE") == "1":
+        compile_fixture = Path(sys.argv[3]).resolve()
+        compile_module = load_module(compile_fixture)
+        compile_token = make_token(module, compile_fixture, "mul_func")
+        cache_dir = Path(
+            module._compile_a_kernel(
+                compile_module.apply_jitfunction_kernel,
+                f"*fp32,{compile_token},32,32",
+                num_warps=1,
+                num_stages=1,
+            )
+        )
+        assert cache_dir.is_dir()
+        assert any(cache_dir.iterdir())
 
 
 if __name__ == "__main__":
