@@ -47,6 +47,7 @@ TORCH_CMAKE_PATH=$(python3 -c "import importlib.util; s=importlib.util.find_spec
     -DTRITON_JIT_USE_EXTERNAL_FMTLIB=OFF \
     -DTRITON_JIT_USE_EXTERNAL_PYBIND11=ON \
     -DTRITON_JIT_BUILD_OPERATORS=OFF \
+    -DBUILD_TESTING=OFF \
     -DTRITON_JIT_INSTALL=ON
 
 %cmake_build
