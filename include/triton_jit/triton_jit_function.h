@@ -311,6 +311,9 @@ class TritonJITFunctionImpl {
     return this->static_sig_;
   }
 
+  // Backward-compatible overload: plain (num_warps, num_stages) are wrapped into a
+  // CompileOptions carrying no extra switches, then forwarded to the primary overload.
+  // Kept so existing call sites (and operator dispatch code) compile unchanged.
   template <typename... Args>
   void operator()(typename Backend::StreamType stream,
                   unsigned int grid_x,
@@ -318,6 +321,21 @@ class TritonJITFunctionImpl {
                   unsigned int grid_z,
                   unsigned int num_warps,
                   unsigned int num_stages,
+                  Args... args) const {
+    CompileOptions copts;
+    copts.num_warps = static_cast<int>(num_warps);
+    copts.num_stages = static_cast<int>(num_stages);
+    (*this)(stream, grid_x, grid_y, grid_z, copts, args...);
+  }
+
+  // Primary overload: CompileOptions carries num_warps/num_stages plus any extra
+  // backend compiler switches (e.g. {"opt_level","O2"}). All of it feeds the cache key.
+  template <typename... Args>
+  void operator()(typename Backend::StreamType stream,
+                  unsigned int grid_x,
+                  unsigned int grid_y,
+                  unsigned int grid_z,
+                  const CompileOptions& copts,
                   Args... args) const {
     const int num_args = this->static_sig_.num_args;
 
@@ -345,14 +363,14 @@ class TritonJITFunctionImpl {
 
     // Get or compile kernel
     const TritonKernelImpl<Backend>& kernel =
-        this->get_kernel(full_signature, num_warps, num_stages, device_index);
+        this->get_kernel(full_signature, copts, device_index);
 
     // Launch kernel with signature (for NPU backend to parse argument types)
     c10::SmallVector<void*> ptrs = buffer.get_ptrs();
     kernel.launch_with_signature(grid_x,
                                  grid_y,
                                  grid_z,
-                                 num_warps,
+                                 copts.num_warps,
                                  stream,
                                  ptrs.data(),
                                  full_signature,
@@ -371,8 +389,11 @@ class TritonJITFunctionImpl {
     Backend::ensure_context();
     int device_index = Backend::get_device_index();
 
+    CompileOptions copts;
+    copts.num_warps = static_cast<int>(num_warps);
+    copts.num_stages = static_cast<int>(num_stages);
     const TritonKernelImpl<Backend>& kernel =
-        this->get_kernel(full_signature, num_warps, num_stages, device_index);
+        this->get_kernel(full_signature, copts, device_index);
 
     kernel.launch_with_signature(grid_x, grid_y, grid_z, num_warps, stream, args, full_signature, num_args);
   }
@@ -380,8 +401,7 @@ class TritonJITFunctionImpl {
  private:
   TritonJITFunctionImpl(std::string_view path, std::string_view name);
   const TritonKernelImpl<Backend>& get_kernel(std::string_view signature,
-                                              int num_warps,
-                                              int num_stages,
+                                              const CompileOptions& opts,
                                               int device_index) const;
 };
 

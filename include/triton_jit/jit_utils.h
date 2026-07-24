@@ -22,10 +22,13 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "c10/util/Logging.h"  // use torch's logging
 #include "torch/torch.h"
@@ -46,6 +49,62 @@
 #endif
 
 namespace triton_jit {
+
+// Compile-time options threaded from the C++ launch call down to triton.compile.
+// num_warps/num_stages are always part of the compiled artifact; `extra` carries
+// backend-specific compiler switches (e.g. MLU opt_level) as string key/values that
+// the Python bridge coerces to the right type. Every field here participates in the
+// kernel cache key -- see get_kernel in triton_jit_function.cpp.
+struct CompileOptions {
+  int num_warps = 4;
+  int num_stages = 3;
+  std::map<std::string, std::string> extra;
+};
+
+namespace detail {
+
+inline void validate_compile_options(const CompileOptions& opts) {
+  for (const char* reserved : {"num_warps", "num_stages"}) {
+    if (opts.extra.find(reserved) != opts.extra.end()) {
+      throw std::invalid_argument(std::string("CompileOptions.extra must not override reserved option '") +
+                                  reserved + "'");
+    }
+  }
+}
+
+inline void append_cache_key_field(std::string& key, std::string_view value) {
+  key += std::to_string(value.size());
+  key.push_back(':');
+  key.append(value.begin(), value.end());
+}
+
+inline std::string make_kernel_cache_key(std::string_view signature,
+                                         int device_index,
+                                         const CompileOptions& opts) {
+  validate_compile_options(opts);
+
+  std::string key;
+  key.reserve(signature.size() + opts.extra.size() * 24 + 64);
+  key += "sig=";
+  append_cache_key_field(key, signature);
+  key += ";dev=";
+  append_cache_key_field(key, std::to_string(device_index));
+  key += ";nw=";
+  append_cache_key_field(key, std::to_string(opts.num_warps));
+  key += ";ns=";
+  append_cache_key_field(key, std::to_string(opts.num_stages));
+  key += ";extra=";
+  append_cache_key_field(key, std::to_string(opts.extra.size()));
+  for (const auto& [name, value] : opts.extra) {
+    key += ";name=";
+    append_cache_key_field(key, name);
+    key += ";value=";
+    append_cache_key_field(key, value);
+  }
+  return key;
+}
+
+}  // namespace detail
 
 constexpr const char* to_triton_typename(c10::ScalarType t) {
   switch (t) {
