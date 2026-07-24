@@ -68,9 +68,6 @@ CLAUDE.md
 AGENTS.md
 .claude/
 
-# Tests (run locally only)
-tests/
-
 # local build outputs
 output/
 debian-packages/

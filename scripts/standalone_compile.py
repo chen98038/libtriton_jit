@@ -148,6 +148,63 @@ def sig_to_npu_type(sig: str) -> dict:
                 return {"type": "i64"}
 
 
+def _bracket_aware_split(sig: str) -> List[str]:
+    """Split on top-level commas while preserving parenthesized tuple groups."""
+    parts = []
+    current = []
+    depth = 0
+
+    for ch in sig:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                raise ValueError(f"unmatched ')' in signature: {sig}")
+            depth -= 1
+
+        if ch == "," and depth == 0:
+            part = "".join(current).strip()
+            if not part:
+                raise ValueError(f"empty token in signature: {sig}")
+            parts.append(part)
+            current = []
+        else:
+            current.append(ch)
+
+    if depth != 0:
+        raise ValueError(f"unmatched '(' in signature: {sig}")
+
+    final = "".join(current).strip()
+    if final:
+        parts.append(final)
+    elif parts:
+        raise ValueError(f"empty token in signature: {sig}")
+    return parts
+
+
+def _parse_type_token(token: str):
+    """Convert a grouped tuple token into Triton's nested signature form."""
+    token = token.strip()
+    if token.startswith("(") and token.endswith(")"):
+        inner = token[1:-1].strip()
+        if not inner:
+            raise ValueError("runtime tuple signature must not be empty")
+        elements = _bracket_aware_split(inner)
+        if any("(" in element or ")" in element for element in elements):
+            raise ValueError("nested runtime tuple signatures are not supported")
+        return tuple(elements)
+    return token
+
+
+def _normalize_gcu_signature(value):
+    """Normalize GCU signatures without changing runtime tuple ABI widths."""
+    if isinstance(value, tuple):
+        if "fp64" in value:
+            raise ValueError("GCU runtime tuple arguments do not support fp64 elements")
+        return value
+    return "fp32" if value == "fp64" else value
+
+
 def generate_arg_layout(
     signature: List[str], constexpr_indices: List[int]
 ) -> List[dict]:
@@ -183,10 +240,12 @@ def generate_arg_layout(
         if sig_clean == "nullopt":
             continue  # Skip nullopt
 
-        # Convert to NPU type
-        type_info = sig_to_npu_type(sig)
-        if type_info["type"] != "constexpr":
-            arg_layout.append(type_info)
+        parsed = _parse_type_token(sig)
+        runtime_types = parsed if isinstance(parsed, tuple) else (parsed,)
+        for runtime_type in runtime_types:
+            type_info = sig_to_npu_type(runtime_type)
+            if type_info["type"] != "constexpr":
+                arg_layout.append(type_info)
 
     return arg_layout
 
@@ -296,7 +355,7 @@ def _compile_a_kernel(
     # for bool use i1, for boolean values, use 0 or 1.
     # split it
 
-    signature: List[str] = list(map(lambda s: s.strip(" "), signature.split(",")))
+    signature: List[str] = _bracket_aware_split(signature)
     num_args = len(signature)
     assert num_args == len(
         fn.params
@@ -311,7 +370,9 @@ def _compile_a_kernel(
 
     # signature, no specializations here
     signature_without_spec = {
-        i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants
+        i: _parse_type_token(s.split(":")[0])
+        for i, s in enumerate(signature)
+        if i not in constants
     }
 
     # specialization: divisibility by 16 or equal to 1
@@ -364,8 +425,7 @@ def _compile_a_kernel(
     # (GCU hardware/compiler does not support double precision operations)
     if get_backend() == "GCU":
         for k in signature_without_spec:
-            if signature_without_spec[k] == "fp64":
-                signature_without_spec[k] = "fp32"
+            signature_without_spec[k] = _normalize_gcu_signature(signature_without_spec[k])
 
     if Version("3.0.0") <= triton_version < Version("3.2.0"):
         src = triton.compiler.ASTSource(
