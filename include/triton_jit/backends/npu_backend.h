@@ -185,6 +185,13 @@ struct NpuBackend {
         grid_z,
         workspace_addr ? fmt::format("{}B", opts.workspace_size * blockNum) : "none");
 
+    // Limit blockNum to the available AIV parallel blocks.
+    // Excessive blockNum may cause redundant Triton program execution.
+    uint32_t ai_core_cnt = 0;
+    if (rtGetAiCoreCount(&ai_core_cnt) == RT_ERROR_NONE && ai_core_cnt > 0) {
+      blockNum = std::min(blockNum, ai_core_cnt * 2);
+    }
+
     // Launch kernel
     rtError_t rt_err = rtKernelLaunch(kernel,
                                       blockNum,
