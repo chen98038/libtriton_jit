@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -204,6 +205,21 @@ DEFINE_TRITON_TYPE(std::string, "constexpr");
 
 template <typename T>
 struct triton_type : triton_type_helper<std::remove_cv_t<std::remove_reference_t<T>>> {};
+
+// Mimic Triton runtime's native_specialize_impl: narrow integer types by value range
+template <typename T>
+constexpr const char* integer_type_name(const T& v) {
+  if constexpr (std::is_integral_v<std::decay_t<T>>) {
+    if constexpr (std::is_unsigned_v<std::decay_t<T>>) {
+      return triton_type<T>::name;
+    }
+    if (v >= INT32_MIN && v <= INT32_MAX) {
+      return "i32";
+    }
+    return "i64";
+  }
+  return triton_type<T>::name;
+}
 
 // path of python executable
 std::filesystem::path get_script_dir();
