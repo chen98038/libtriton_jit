@@ -208,7 +208,7 @@ struct triton_type : triton_type_helper<std::remove_cv_t<std::remove_reference_t
 
 // Mimic Triton runtime's native_specialize_impl: narrow integer types by value range
 template <typename T>
-constexpr const char* integer_type_name(const T& v) {
+constexpr const char* narrow_type_name(const T& v) {
   if constexpr (std::is_integral_v<std::decay_t<T>>) {
     if constexpr (std::is_unsigned_v<std::decay_t<T>>) {
       return triton_type<T>::name;
