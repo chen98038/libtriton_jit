@@ -35,6 +35,7 @@
 #include "fmt/core.h"
 #include "triton_jit/backend_config.h"
 #include "triton_jit/backend_policy.h"
+#include "triton_jit/jit_function_arg.h"
 #include "triton_jit/jit_utils.h"
 #include "triton_jit/triton_kernel.h"
 
@@ -136,11 +137,19 @@ struct ArgHandle {
       handle_optional(item);
     } else if constexpr (is_same_ignore_cvref<c10::Scalar, T>::value) {
       handle_scalar(item);
+    } else if constexpr (is_same_ignore_cvref<JitFunctionArg, T>::value) {
+      handle_jitfunction(item);
     } else if constexpr (is_std_tuple<std::remove_cvref_t<T>>::value) {
       handle_tuple(item);
     } else {
       handle_arg_plain(item);
     }
+  }
+
+  void handle_jitfunction(const JitFunctionArg& item) {
+    (void)this->ssig.at(idx);
+    signature.push_back(item.signature_token());
+    idx++;
   }
 
   template <typename... Ts>
