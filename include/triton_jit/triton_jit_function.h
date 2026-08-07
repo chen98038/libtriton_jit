@@ -267,7 +267,7 @@ struct ArgHandle {
 
   template <typename T>
   void handle_specialized(const T& item) {
-    const char* dtype = triton_type<decltype(item)>::name;
+    const char* dtype = narrow_type_name(item);
     if constexpr (std::is_integral_v<std::remove_cv_t<std::remove_reference_t<decltype(item)>>>) {
       const char* specialization = "";
 #if defined(BACKEND_NPU)
@@ -290,7 +290,7 @@ struct ArgHandle {
 
   template <typename T>
   void handle_specialized_no_alignment(const T& item) {
-    const char* dtype = triton_type<decltype(item)>::name;
+    const char* dtype = narrow_type_name(item);
     if constexpr (std::is_integral_v<std::remove_cv_t<std::remove_reference_t<decltype(item)>>>) {
       const bool equal_to_1 = item == 1;
 #if defined(BACKEND_NPU)
@@ -311,7 +311,7 @@ struct ArgHandle {
   template <typename T>
   void handle_non_constexpr(const T& item) {
     this->buf.push_arg(item);
-    const char* dtype = triton_type<decltype(item)>::name;
+    const char* dtype = narrow_type_name(item);
     signature.push_back(dtype);
   }
 
