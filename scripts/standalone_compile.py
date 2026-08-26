@@ -540,6 +540,16 @@ def _compile_a_kernel(
     # integer 1 in value, but the corresponding ArgType in static signature is not constexpr are added into constants
     for i in equal_to_1:
         constants.update({i: 1})
+        # An equal-to-one argument is a compile-time constant, so it must also
+        # leave the runtime signature. `signature_without_spec` was built before
+        # these indices joined `constants`, and the >=3.3 branch below prefers it,
+        # so without this the same parameter is declared twice: as "i32" in the
+        # signature and as the constant 1. Triton still folds it -- the generated
+        # code is identical -- but the resulting ASTSource, and therefore the
+        # compilation cache key, no longer matches the one the native Python
+        # runtime builds for the same call, so the two paths never share a
+        # compiled kernel.
+        signature_without_spec.pop(i, None)
         # Nones in value, but the corresponding ArgType in static signature is not constexpr are added into constants
     for i, v in signature_without_spec.items():
         if v == "nullopt":

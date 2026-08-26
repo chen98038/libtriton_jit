@@ -148,6 +148,14 @@ constexpr const char* spec(T v) {
   return v % 16 == 0 ? ":16" : v == 1 ? ":1" : "";
 }
 
+// Alignment specialization for device addresses. Pointers only ever get the
+// divisibility hint: an address that happened to equal 1 must not become ":1",
+// which would drop the pointer from the runtime ABI like a constant integer.
+template <typename T>
+constexpr const char* ptr_spec(T v) {
+  return v % 16 == 0 ? ":16" : "";
+}
+
 template <typename T, typename = void>
 struct has_data_ptr : std::false_type {};
 

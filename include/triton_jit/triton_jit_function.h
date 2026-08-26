@@ -35,6 +35,7 @@
 #include "fmt/core.h"
 #include "triton_jit/backend_config.h"
 #include "triton_jit/backend_policy.h"
+#include "triton_jit/device_ptr.h"
 #include "triton_jit/jit_function_arg.h"
 #include "triton_jit/jit_utils.h"
 #include "triton_jit/triton_kernel.h"
@@ -213,6 +214,8 @@ struct ArgHandle {
   void handle_arg_plain(const T& item) {
     if constexpr (is_same_ignore_cvref<at::Tensor, T>::value) {
       handle_tensor(item);
+    } else if constexpr (is_same_ignore_cvref<TritonDevicePtr, T>::value) {
+      handle_device_ptr(item);
     } else if constexpr (is_same_ignore_cvref<std::nullopt_t, T>::value) {
       // Assumption: nullopt is always treated as constexpr,
       // even if the parameter is not marked as constexpr
@@ -251,9 +254,30 @@ struct ArgHandle {
     const char* specialization = "";
     if (ssig.at(idx) == ArgType::SPECIALIZED) {
 #if defined(BACKEND_NPU)
-      // NPU: disable :1 specialization to keep arg list consistent
+      // NPU: disable pointer specialization to keep arg list consistent
 #else
-      specialization = spec(reinterpret_cast<std::uintptr_t>(p_item));
+      specialization = ptr_spec(reinterpret_cast<std::uintptr_t>(p_item));
+#endif
+    }
+    std::string sig_for_idx = fmt::format("*{}{}", dtype, specialization);
+    signature.push_back(sig_for_idx);
+  }
+
+  // Raw device pointer with an explicit element dtype (see device_ptr.h).
+  // Mirrors handle_tensor: pushed into the runtime ABI verbatim, specialized
+  // only on 16-byte address alignment.
+  void handle_device_ptr(const TritonDevicePtr& item) {
+    // Assumption: a device pointer is never constexpr
+    TORCH_CHECK(this->ssig.at(idx) != ArgType::CONSTEXPR);
+    this->buf.push_arg(item.value);
+    const char* dtype = to_triton_typename(item.dtype);
+
+    const char* specialization = "";
+    if (ssig.at(idx) == ArgType::SPECIALIZED) {
+#if defined(BACKEND_NPU)
+      // NPU: disable pointer specialization to keep arg list consistent
+#else
+      specialization = ptr_spec(item.value);
 #endif
     }
     std::string sig_for_idx = fmt::format("*{}{}", dtype, specialization);
