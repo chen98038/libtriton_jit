@@ -34,3 +34,18 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/jit_function_module.py
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/jit_function_compile_module.py
 )
+
+add_executable(test_device_ptr test_device_ptr.cpp)
+target_link_libraries(test_device_ptr PRIVATE TritonJIT::triton_jit)
+add_test(NAME device_ptr_cpp COMMAND test_device_ptr)
+
+add_test(
+    NAME standalone_equal_to_one
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        TRITON_JIT_BACKEND=${TRITON_BACKEND_NAME}
+        ${Python_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_standalone_equal_to_one.py
+        ${PROJECT_SOURCE_DIR}/scripts/standalone_compile.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/equal_to_one_module.py
+)
