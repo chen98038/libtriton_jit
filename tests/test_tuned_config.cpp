@@ -420,11 +420,18 @@ void test_exported_fixture_round_trip() {
   CHECK(report.kernels == 3);
   CHECK(report.entries == 4);
   CHECK(report.table_fingerprint.triton_version == "3.6.0");
+  const std::string source_namespace = "tests/test_export_tuned_table.py";
+  const auto sgemv_id = triton_jit::scoped_kernel_id("sgemv_n_kernel", source_namespace);
+  const auto mm_id = triton_jit::scoped_kernel_id("mm_kernel", source_namespace);
+  const auto softmax_id = triton_jit::scoped_kernel_id("softmax_kernel", source_namespace);
   // sgemv: default strategies, three dtype keys (A, x, y)
   const int64_t dims[] = {1, 8192};
   const char* fp32x3[] = {"torch.float32", "torch.float32", "torch.float32"};
-  const auto* decode = table.find("sgemv_n_kernel", 0, TuneKeyView {dims, 2, fp32x3, 3});
+  const auto* decode = table.find(sgemv_id, 0, TuneKeyView {dims, 2, fp32x3, 3});
   CHECK(decode != nullptr);
+  CHECK(table.find("sgemv_n_kernel", 0, TuneKeyView {dims, 2, fp32x3, 3}) == nullptr);
+  CHECK(table.find(triton_jit::scoped_kernel_id("sgemv_n_kernel", "other/source.py"),
+                   0, TuneKeyView {dims, 2, fp32x3, 3}) == nullptr);
   if (decode) {
     CHECK(decode->num_warps == 8 && decode->num_stages == 2);
     CHECK(decode->get_i64("BLOCK_M", -1) == 8 && decode->get_i64("BLOCK_K", -1) == 256);
@@ -433,7 +440,7 @@ void test_exported_fixture_round_trip() {
   // mm: log/log/align32 with a raw shape, bool recovered, extras carried
   const int64_t raw[] = {1000, 4000, 4090};
   const char* halves[] = {"torch.float16", "torch.float16"};
-  const auto* big = table.find("mm_kernel", 0, TuneKeyView {raw, 3, halves, 2});
+  const auto* big = table.find(mm_id, 0, TuneKeyView {raw, 3, halves, 2});
   CHECK(big != nullptr);
   if (big) {
     CHECK(big->get_bool("EVEN_K", false) == true);
@@ -446,13 +453,14 @@ void test_exported_fixture_round_trip() {
   }
   const int64_t small_raw[] = {33, 64, 40};  // log(33)=64, log(64)=64, align32(40)=64
   const char* bf16s[] = {"torch.bfloat16", "torch.bfloat16"};
-  const auto* small = table.find("mm_kernel", 0, TuneKeyView {small_raw, 3, bf16s, 2});
+  const auto* small = table.find(mm_id, 0, TuneKeyView {small_raw, 3, bf16s, 2});
   CHECK(small != nullptr && small->get_bool("EVEN_K", true) == false && small->get_i64("SPLIT_K", -1) == 4);
-  const auto* handle = table.kernel("mm_kernel", 0);
+  const auto* handle = table.kernel(mm_id, 0);
+  CHECK(handle != nullptr && handle->info().cache_namespace == source_namespace);
   CHECK(handle != nullptr && handle->info().candidate_set_hash.size() == 32);
   CHECK(handle != nullptr && !handle->info().config_table_name.empty());
   // the refused kernel is listed with its reason and never hits
-  const auto* refused = table.kernel("softmax_kernel", 0);
+  const auto* refused = table.kernel(softmax_id, 0);
   CHECK(refused != nullptr && refused->info().unsupported.find("heuristics") != std::string::npos);
 }
 
