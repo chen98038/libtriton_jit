@@ -88,3 +88,78 @@ replay; keeping a global freeze active also forbids cold preparation there.
 Program and function caches use short locks; compilation does not hold those
 locks. Concurrent misses may compile redundantly, but publication retains a
 completed program and backend loading is synchronized.
+
+## Optional online resolver
+
+Link `TritonJIT::triton_jit_torch_resolver`, enabled by
+`TRITON_JIT_BUILD_TORCH_RESOLVER` (default ON). Only that target adds a dependency
+on `libtorch_python`; the core runtime already uses Torch and an embedded Python
+compiler. Its hot configuration lookup does not enter Python.
+
+Install the resolver once, then describe the actual kernel arguments:
+
+```cpp
+#include "triton_jit/torch/tuned_resolver.h"
+
+auto& table = triton_jit::TunedTable::instance();
+table.set_resolver(triton_jit::torch_resolver::make_resolver({"flag_gems"}));
+
+triton_jit::torch_resolver::ResolveArgs ctx;
+ctx.source_path = kernel_source;
+ctx.cache_namespace = "flag_gems/mm@revision";
+ctx.args = kernel_arguments;  // Match the Python kernel's positional parameters.
+ctx.grid = "(triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),)";
+const auto id = triton_jit::scoped_kernel_id(kernel_name, ctx.cache_namespace);
+const auto* config = table.find(id, device_index, key);
+if (!config) config = table.resolve(kernel_name, device_index, key, &ctx, stream);
+```
+
+The namespace must match offline exports. Without an explicit namespace, the
+adapter uses `source_path`. `find_for_context()` performs the same binding but
+constructs the identity string on each call; callers may pre-bind `id` above.
+
+`resolve()` returns a configuration, not a calculation result. A C++ hit returns
+directly. A cold miss calls the resolver outside runtime locks; Python may reuse
+its config cache or benchmark candidates using LibTuner's own pruning and policy.
+The result is validated and stored under the normalized key. Program preparation
+and the final business launch are separate steps.
+
+No resolver or a declared unsupported case returns no configuration. Without
+`grid`, an untuned key is unsupported; cached selections remain usable. Grid
+expressions have kernel arguments, `META`, `triton` and `math` in scope, without
+Python builtins. Other errors propagate to callers. Frozen/captured cold misses
+are rejected before the callback runs.
+
+### Concurrency and benchmark isolation
+
+- Pending requests share a result per identity/device/key. Once the schema is
+  bound, keys are normalized before sharing; the first unknown-schema requests
+  can still tune separately. Misses and exceptions are not retained as configs.
+- Online entries are append-only with stable addresses. Publication locks cover
+  reading the latest state, validation and insertion; Python runs outside them.
+  Existing handles see later online entries in their generation, while `info()`
+  is metadata from when that handle was published.
+- The Torch wait hook releases a held GIL. Custom Python-facing resolvers must
+  provide an equivalent wait hook; identity hooks must not enter Python.
+- Cold benchmarking copies each backing storage once, preserving dtype, shape,
+  stride, offset and aliases across args/kwargs. Local tuner state and built-in
+  reset/restore hooks use those copies. Persistent caches and JIT objects remain
+  shared. The final business launch uses the caller's original arguments.
+- `TRITON_JIT_BENCH_MAX_BYTES` bounds copied storage (default 1 GiB). Unsupported
+  layouts, quantized/special views and custom launch hooks are rejected. The
+  implementation does not promise arbitrary third-party hook/policy safety.
+- The CUDA adapter checks tensor devices and uses the supplied launch stream,
+  restoring the previous stream afterwards. Cross-stream input dependencies
+  remain the caller's responsibility.
+
+Mixed native Python/C++ cold tuning needs consumer-side coordination. Historical
+FlagGems experiments used a shared benchmark RLock and
+`FLAGGEMS_BENCHMARK_MODE=event` set **before import**. Those changes belong in
+FlagGems and are not applied by this library. A benchmark lock alone does not
+make default global graph benchmarking safe alongside arbitrary CUDA work.
+
+## Validation
+
+Run the normal CTest suite for CPU-capable regressions. See
+[CUDA test commands](../tests/cuda/README.md) to enable the real GIL and
+capture/replay checks, or run tensor layouts under compute-sanitizer.

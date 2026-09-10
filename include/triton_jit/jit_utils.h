@@ -232,6 +232,11 @@ constexpr const char* narrow_type_name(const T& v) {
 // path of python executable
 std::filesystem::path get_script_dir();
 
+// Bring up the embedded interpreter the way the runtime does (TRITON_JIT_BACKEND
+// in os.environ, vendor torch modules imported). Idempotent; safe to call
+// before touching Python from a consumer.
+void ensure_initialized();
+
 #ifdef BACKEND_NPU
 // ACL error checking function
 inline void checkAclErrors(aclError code, const char* message = "") {
