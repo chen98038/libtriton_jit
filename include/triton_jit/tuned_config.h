@@ -205,8 +205,10 @@ class TunedTable {
   // unknown, or the key has no row.
   const TunedConfig* find(std::string_view kernel_id, int device_index, TuneKeyView key) const noexcept;
   // Uses the installed resolver's source binding without entering Python.
-  const TunedConfig* find_for_context(std::string_view kernel_id, int device_index,
-                                     TuneKeyView key, const void* context) const;
+  const TunedConfig* find_for_context(std::string_view kernel_id,
+                                      int device_index,
+                                      TuneKeyView key,
+                                      const void* context) const;
   // Handle for callers that want to skip the kernel lookup on every launch.
   const TunedKernelTable* kernel(std::string_view kernel_id, int device_index) const noexcept;
 
@@ -228,17 +230,17 @@ class TunedTable {
   // means "no configuration for this key"; the miss is not cached and the
   // next resolve() asks again. Exceptions propagate to every caller waiting
   // on that key.
-  struct Resolver : std::function<std::optional<ResolvedEntry>(
-      std::string_view, int, TuneKeyView, const void*)> {
-    using Function = std::function<std::optional<ResolvedEntry>(
-        std::string_view, int, TuneKeyView, const void*)>;
+  struct Resolver
+      : std::function<std::optional<ResolvedEntry>(std::string_view, int, TuneKeyView, const void*)> {
+    using Function =
+        std::function<std::optional<ResolvedEntry>(std::string_view, int, TuneKeyView, const void*)>;
     using Function::Function;
     // Optional adapter hooks. identity must not enter Python. wait is where a
     // Python-facing adapter releases the GIL, including for non-owner callers.
     std::function<std::string(std::string_view, const void*)> identity;
     std::function<const TunedConfig*(std::shared_future<const TunedConfig*>&)> wait;
-    std::function<std::optional<ResolvedEntry>(std::string_view, int, TuneKeyView,
-                                               const void*, void*)> with_stream;
+    std::function<std::optional<ResolvedEntry>(std::string_view, int, TuneKeyView, const void*, void*)>
+        with_stream;
   };
   void set_resolver(Resolver resolver);
   bool has_resolver() const noexcept;

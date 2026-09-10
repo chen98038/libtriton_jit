@@ -145,10 +145,11 @@ namespace torch_resolver {
   TunedTable::Resolver make_resolver(Options options) {
     auto reported = std::make_shared<std::set<std::string>>();
     auto opts = std::make_shared<const Options>(std::move(options));
-    TunedTable::Resolver resolver = [reported, opts](std::string_view kernel_id,
-                            int device_index,
-                            TuneKeyView key,
-                            const void* context) -> std::optional<TunedTable::ResolvedEntry> {
+    TunedTable::Resolver resolver = [reported, opts](
+                                        std::string_view kernel_id,
+                                        int device_index,
+                                        TuneKeyView key,
+                                        const void* context) -> std::optional<TunedTable::ResolvedEntry> {
       const auto* resolve_args = static_cast<const ResolveArgs*>(context);
       if (resolve_args == nullptr) {
         return std::nullopt;
@@ -162,8 +163,10 @@ namespace torch_resolver {
           if (const auto* tensor = std::get_if<at::Tensor>(&value); tensor && tensor->is_cuda()) {
             if (tensor->get_device() != device_index)
               throw std::runtime_error("tuned resolver: tensor device differs from requested device");
-            if (!stream_guard) stream_guard.emplace(c10::cuda::getStreamFromExternal(
-                static_cast<cudaStream_t>(resolve_args->launch_stream), device_index));
+            if (!stream_guard)
+              stream_guard.emplace(
+                  c10::cuda::getStreamFromExternal(static_cast<cudaStream_t>(resolve_args->launch_stream),
+                                                   device_index));
           }
         };
         for (const auto& value : resolve_args->args) check_device(value);
@@ -195,8 +198,9 @@ namespace torch_resolver {
                                                 py::arg("grid") = grid);
         (void)device_index;
         auto entry = parse_answer(answer.cast<py::dict>(), kernel_id, key, *reported);
-        if (entry) entry->cache_namespace = resolve_args->cache_namespace.empty()
-            ? resolve_args->source_path : resolve_args->cache_namespace;
+        if (entry)
+          entry->cache_namespace = resolve_args->cache_namespace.empty() ? resolve_args->source_path
+                                                                         : resolve_args->cache_namespace;
         return entry;
       } catch (const py::error_already_set& error) {
         throw std::runtime_error("tuned resolver: Python raised while resolving '" + std::string(kernel_id) +
@@ -205,8 +209,10 @@ namespace torch_resolver {
     };
     resolver.identity = [](std::string_view kernel, const void* context) {
       const auto* args = static_cast<const ResolveArgs*>(context);
-      return scoped_kernel_id(kernel, args ? (args->cache_namespace.empty() ? args->source_path : args->cache_namespace)
-                                          : std::string_view{});
+      return scoped_kernel_id(
+          kernel,
+          args ? (args->cache_namespace.empty() ? args->source_path : args->cache_namespace)
+               : std::string_view {});
     };
     resolver.wait = [](std::shared_future<const TunedConfig*>& future) {
       if (Py_IsInitialized() && PyGILState_Check()) {
@@ -216,13 +222,13 @@ namespace torch_resolver {
       return future.get();
     };
     auto callback = static_cast<TunedTable::Resolver::Function>(resolver);
-    resolver.with_stream = [callback](std::string_view kernel, int device, TuneKeyView key,
-                                      const void* context, void* stream) {
-      if (!context) return std::optional<TunedTable::ResolvedEntry>{};
-      auto local = *static_cast<const ResolveArgs*>(context);
-      local.launch_stream = stream;
-      return callback(kernel, device, key, &local);
-    };
+    resolver.with_stream =
+        [callback](std::string_view kernel, int device, TuneKeyView key, const void* context, void* stream) {
+          if (!context) return std::optional<TunedTable::ResolvedEntry> {};
+          auto local = *static_cast<const ResolveArgs*>(context);
+          local.launch_stream = stream;
+          return callback(kernel, device, key, &local);
+        };
     return resolver;
   }
 

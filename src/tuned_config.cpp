@@ -443,7 +443,10 @@ uint64_t TunedKernelTable::hash_key(const int64_t* dims, const char* const* dtyp
 // insert_resolved serializes writers. A cached table handle sees later online
 // inserts, while its info() describes the publication at which it was obtained.
 struct TunedKernelTable::OnlineStorage {
-  struct Node { Entry entry; const Node* next = nullptr; };
+  struct Node {
+    Entry entry;
+    const Node* next = nullptr;
+  };
   static constexpr size_t kBuckets = 1024;
   std::atomic<const Node*> buckets[kBuckets] {};
   std::vector<std::unique_ptr<Node>> owned;
@@ -451,8 +454,8 @@ struct TunedKernelTable::OnlineStorage {
 
 std::string scoped_kernel_id(std::string_view kernel_id, std::string_view cache_namespace) {
   if (cache_namespace.empty()) return std::string(kernel_id);
-  return "@" + std::to_string(cache_namespace.size()) + ":" +
-         std::string(cache_namespace) + ":" + std::string(kernel_id);
+  return "@" + std::to_string(cache_namespace.size()) + ":" + std::string(cache_namespace) + ":" +
+         std::string(kernel_id);
 }
 
 void TunedKernelTable::build_index() {
@@ -498,7 +501,8 @@ const TunedConfig* TunedKernelTable::find(TuneKeyView key) const noexcept {
   };
   if (online_) {
     auto* node = online_->buckets[hash & (OnlineStorage::kBuckets - 1)].load(std::memory_order_acquire);
-    for (; node; node = node->next) if (matches(node->entry)) return &node->entry.config;
+    for (; node; node = node->next)
+      if (matches(node->entry)) return &node->entry.config;
   }
   if (offline_) return offline_->find(key);
   if (entries_.empty()) return nullptr;
@@ -553,7 +557,8 @@ TunedTable::LoadReport TunedTable::load(const std::filesystem::path& path,
     fail(path, "top level is not an object");
   }
   const auto version_it = root.find("format_version");
-  if (version_it == root.end() || !version_it->is_number_integer() || (version_it->get<int>() != 1 && version_it->get<int>() != 2)) {
+  if (version_it == root.end() || !version_it->is_number_integer() ||
+      (version_it->get<int>() != 1 && version_it->get<int>() != 2)) {
     fail(path, "unsupported or missing format_version (expected 1 or 2)");
   }
   const BackendFingerprint table_fp = parse_fingerprint(path, root);
@@ -581,8 +586,7 @@ TunedTable::LoadReport TunedTable::load(const std::filesystem::path& path,
     if (version_it->get<int>() == 1 && !info.cache_namespace.empty())
       fail(path, context + ": cache_namespace requires format_version 2");
     table->storage_id_ = scoped_kernel_id(info.kernel_id, info.cache_namespace);
-    if (!identities.insert(table->storage_id_).second)
-      fail(path, context + ": duplicate kernel identity");
+    if (!identities.insert(table->storage_id_).second) fail(path, context + ": duplicate kernel identity");
     info.op_name = optional_string(kernel_json, "op_name");
     info.config_table_name = optional_string(kernel_json, "config_table_name");
     info.source_sha256 = optional_string(kernel_json, "source_sha256");
@@ -871,8 +875,7 @@ const TunedConfig* TunedTable::insert_resolved(std::string_view kernel_id,
     if (it != map.end()) current = it->second;
   }
   if (current) {
-    if (current->info_.key_columns != resolved.key_columns ||
-        current->info_.ndtype_keys != raw_key.ndtypes) {
+    if (current->info_.key_columns != resolved.key_columns || current->info_.ndtype_keys != raw_key.ndtypes) {
       throw std::runtime_error("tuned resolver for '" + std::string(kernel_id) +
                                "' disagrees with the bound key schema");
     }
@@ -898,7 +901,7 @@ const TunedConfig* TunedTable::insert_resolved(std::string_view kernel_id,
   }
   node->entry.config = resolved.config;
   auto& bucket = table->online_->buckets[table->hash_key(node->entry.dims.data(), dtypes.data()) &
-                                       (TunedKernelTable::OnlineStorage::kBuckets - 1)];
+                                         (TunedKernelTable::OnlineStorage::kBuckets - 1)];
   node->next = bucket.load(std::memory_order_relaxed);
   auto* saved = node.get();
   table->online_->owned.push_back(std::move(node));
@@ -908,8 +911,10 @@ const TunedConfig* TunedTable::insert_resolved(std::string_view kernel_id,
   return &saved->entry.config;
 }
 
-const TunedConfig* TunedTable::find_for_context(std::string_view kernel_id, int device_index,
-                                               TuneKeyView key, const void* context) const {
+const TunedConfig* TunedTable::find_for_context(std::string_view kernel_id,
+                                                int device_index,
+                                                TuneKeyView key,
+                                                const void* context) const {
   const auto resolver = std::atomic_load_explicit(&resolver_, std::memory_order_acquire);
   if (resolver && resolver->identity) return find(resolver->identity(kernel_id, context), device_index, key);
   return find(kernel_id, device_index, key);
@@ -922,14 +927,17 @@ const TunedConfig* TunedTable::resolve(
   for (size_t i = 0; i < key.ndtypes; ++i)
     if (!key.dtypes[i]) throw std::invalid_argument("tuned resolve: null dtype");
   const auto resolver = std::atomic_load_explicit(&resolver_, std::memory_order_acquire);
-  const std::string storage_id = resolver && resolver->identity ? resolver->identity(kernel_id, context)
-                                                               : std::string(kernel_id);
+  const std::string storage_id =
+      resolver && resolver->identity ? resolver->identity(kernel_id, context) : std::string(kernel_id);
   if (const TunedConfig* hit = find(storage_id, device_index, key)) return hit;
   if (!resolver) {
     return nullptr;
   }
   // Fail fast before any work that could enter Python.
-  detail::refuse_if_frozen(stream, "resolve tuned config for '" + storage_id + "' on device " + std::to_string(device_index) + " key=" + inflight_key("", device_index, key), ColdWork::kConfig);
+  detail::refuse_if_frozen(stream,
+                           "resolve tuned config for '" + storage_id + "' on device " +
+                               std::to_string(device_index) + " key=" + inflight_key("", device_index, key),
+                           ColdWork::kConfig);
 
   std::vector<int64_t> normalized;
   TuneKeyView flight_key = key;
@@ -956,7 +964,8 @@ const TunedConfig* TunedTable::resolve(
     }
   }
   if (!owner) {
-    return resolver->wait ? resolver->wait(future) : future.get();  // waits outside every lock; rethrows the owner's exception
+    return resolver->wait ? resolver->wait(future)
+                          : future.get();  // waits outside every lock; rethrows the owner's exception
   }
   // Owner: run the resolver with no runtime lock held, publish, then release
   // the waiters. The key views point at the caller's storage, which outlives
@@ -967,9 +976,9 @@ const TunedConfig* TunedTable::resolve(
     if (const auto* hit = find(storage_id, device_index, key)) {
       result = hit;
     } else {
-      std::optional<ResolvedEntry> resolved = resolver->with_stream
-          ? resolver->with_stream(kernel_id, device_index, key, context, stream)
-          : (*resolver)(kernel_id, device_index, key, context);
+      std::optional<ResolvedEntry> resolved =
+          resolver->with_stream ? resolver->with_stream(kernel_id, device_index, key, context, stream)
+                                : (*resolver)(kernel_id, device_index, key, context);
       if (resolved) {
         result = insert_resolved(kernel_id, storage_id, device_index, key, *resolved);
       }

@@ -1,16 +1,18 @@
 // Source identity and concurrent configuration publication regressions.
-#include "triton_jit/tuned_config.h"
 #include <atomic>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
+#include "triton_jit/tuned_config.h"
 
 using namespace triton_jit;
 
 static TunedTable::ResolvedEntry entry(int64_t block) {
   TunedTable::ResolvedEntry result;
-  result.key_columns = {{"M", KeyStrategy::kDefault}};
+  result.key_columns = {
+      {"M", KeyStrategy::kDefault}
+  };
   result.config.kwargs.emplace_back("BLOCK_M", block);
   return result;
 }
@@ -39,8 +41,8 @@ int main(int argc, char** argv) {
     if (a->get_i64("BLOCK_M", -1) != 64 || b->get_i64("BLOCK_M", -1) != 128 || calls != 2) return 1;
   } else if (mode == "race") {
     constexpr int n = 16, seeds = 128;
-    std::atomic<int> ready{0};
-    std::atomic<bool> go{false};
+    std::atomic<int> ready {0};
+    std::atomic<bool> go {false};
     table.set_resolver([&](auto, auto, TuneKeyView key, const void*) {
       if (key.dims[0] >= seeds) {
         ready.fetch_add(1);
@@ -50,16 +52,18 @@ int main(int argc, char** argv) {
     });
     for (int64_t k = 0; k < seeds; ++k) table.resolve("race", 0, {&k, 1, nullptr, 0});
     std::vector<std::thread> workers;
-    std::atomic<int> returned{0};
-    for (int i = 0; i < n; ++i) workers.emplace_back([&, i] {
-      const int64_t k = seeds + i;
-      if (table.resolve("race", 0, {&k, 1, nullptr, 0})) returned.fetch_add(1);
-    });
+    std::atomic<int> returned {0};
+    for (int i = 0; i < n; ++i)
+      workers.emplace_back([&, i] {
+        const int64_t k = seeds + i;
+        if (table.resolve("race", 0, {&k, 1, nullptr, 0})) returned.fetch_add(1);
+      });
     while (ready.load() != n) std::this_thread::yield();
     go.store(true);
     for (auto& worker : workers) worker.join();
     int retained = 0;
-    for (int64_t k = seeds; k < seeds + n; ++k) retained += table.find("race", 0, {&k, 1, nullptr, 0}) != nullptr;
+    for (int64_t k = seeds; k < seeds + n; ++k)
+      retained += table.find("race", 0, {&k, 1, nullptr, 0}) != nullptr;
     std::cout << "{\"probe\":\"different_key_publication\",\"returned\":" << returned
               << ",\"new_rows_retained\":" << retained << ",\"expected\":" << n << "}\n";
     if (retained != n || returned != n) return 1;

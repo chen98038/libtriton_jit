@@ -431,7 +431,8 @@ void test_exported_fixture_round_trip() {
   CHECK(decode != nullptr);
   CHECK(table.find("sgemv_n_kernel", 0, TuneKeyView {dims, 2, fp32x3, 3}) == nullptr);
   CHECK(table.find(triton_jit::scoped_kernel_id("sgemv_n_kernel", "other/source.py"),
-                   0, TuneKeyView {dims, 2, fp32x3, 3}) == nullptr);
+                   0,
+                   TuneKeyView {dims, 2, fp32x3, 3}) == nullptr);
   if (decode) {
     CHECK(decode->num_warps == 8 && decode->num_stages == 2);
     CHECK(decode->get_i64("BLOCK_M", -1) == 8 && decode->get_i64("BLOCK_K", -1) == 256);
@@ -584,7 +585,8 @@ void test_resolver() {
   }
   CHECK(calls.load() == before + 1);
   for (const auto* answer : answers) {
-    CHECK(answer != nullptr && answer == answers[0] && answer->get_i64("BLOCK", -1) >= 77 && answer->get_i64("BLOCK", -1) <= 84);
+    CHECK(answer != nullptr && answer == answers[0] && answer->get_i64("BLOCK", -1) >= 77 &&
+          answer->get_i64("BLOCK", -1) <= 84);
   }
   // resolving into a loaded table keeps the table's own key layout, and a
   // key of the wrong width is an error rather than a silent bad row
@@ -593,7 +595,9 @@ void test_resolver() {
   bool schema_refused = false;
   try {
     table.resolve("sgemv_n_kernel", 0, TuneKeyView {dims, 2, fp32, 1}, &calls);
-  } catch (const std::runtime_error&) { schema_refused = true; }
+  } catch (const std::runtime_error&) {
+    schema_refused = true;
+  }
   CHECK(schema_refused);  // Same width, different strategies must never be merged.
   CHECK(table.kernel("sgemv_n_kernel", 0)->info().entry_count == 3);
   const int64_t one_dim[] = {5};

@@ -151,7 +151,9 @@ class LibTuner:
         self.benchmark_table_name = f"{name}_bench"
         self.cache = KVCache()
         self.timings = timings  # config index -> p50
-        self.trace = {}  # Shared observer; invocation state lives on a local tuner copy.
+        self.trace = (
+            {}
+        )  # Shared observer; invocation state lives on a local tuner copy.
         self.bench_calls: List[Any] = []
         self.pre_hook_calls = 0
         self.policy_calls = 0
