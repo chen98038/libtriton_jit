@@ -31,7 +31,8 @@ add_library(
   jit_function_arg.cpp
   jit_utils.cpp
   kernel_metadata.cpp
-  launch_hooks.cpp)
+  launch_hooks.cpp
+  tuned_config.cpp)
 target_include_directories(triton_jit
   PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

@@ -190,6 +190,14 @@ to call operators via the dispatcher.
 
 We have examples of pointwise addition and summation.
 
+### Tuned launch configurations
+
+Use `TunedTable` to load and query configurations exported from Python LibTuner.
+Lookup uses the kernel's source namespace, device and normalized input key;
+a miss leaves the fallback choice to the caller.
+
+See [Autotune usage and contracts](docs/autotune.md) for setup and examples.
+
 ## How to build
 
 ### Install dependencies

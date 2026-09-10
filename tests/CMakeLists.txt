@@ -49,3 +49,18 @@ add_test(
         ${PROJECT_SOURCE_DIR}/scripts/standalone_compile.py
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/equal_to_one_module.py
 )
+
+add_executable(test_tuned_config test_tuned_config.cpp)
+target_link_libraries(test_tuned_config PRIVATE TritonJIT::triton_jit)
+target_compile_definitions(
+    test_tuned_config
+    PRIVATE TRITON_JIT_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+add_test(NAME tuned_config_cpp COMMAND test_tuned_config)
+add_test(
+    NAME export_tuned_table_python
+    COMMAND
+        ${Python_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_export_tuned_table.py
+        ${PROJECT_SOURCE_DIR}/scripts/export_tuned_table.py
+)
