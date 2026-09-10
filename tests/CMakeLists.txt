@@ -64,3 +64,7 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/test_export_tuned_table.py
         ${PROJECT_SOURCE_DIR}/scripts/export_tuned_table.py
 )
+
+add_executable(test_freeze test_freeze.cpp)
+target_link_libraries(test_freeze PRIVATE TritonJIT::triton_jit)
+add_test(NAME freeze_cpp COMMAND test_freeze)

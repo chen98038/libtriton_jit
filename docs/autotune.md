@@ -57,3 +57,34 @@ contract, not automatic proof that source contents are unchanged.
 Table/config pointers remain valid until `clear()`. Loading creates a new table
 generation; existing handles retain their previous generation. `clear()` is only
 for quiescent teardown or tests, never concurrent with lookup or resolution.
+
+## Preparing programs and freezing cold work
+
+Prepare with the same signature, compile options and device as the normal launch:
+
+```cpp
+function.prepare(signature, options, device_index, stream);
+if (!function.is_prepared(signature, options, device_index)) {
+  throw std::runtime_error("program is not prepared");
+}
+```
+
+Generate `signature` with the normal argument-handling path; a tuned key can
+cover multiple launch signatures. `prepare()` compiles and loads the GPU module
+without launching the business kernel or modifying its tensors.
+
+`ScopedFreeze` is a process-wide, nestable policy: ready calls can execute, while
+cold work throws `FrozenMissError`. Without an explicit guard, supported backends
+also check whether the supplied launch stream is being captured. The error's
+`work()` distinguishes missing config, program or function; `restriction()`
+distinguishes explicit freeze from capture.
+
+Prepare before capture. Compilation or tuning may synchronize or start nested
+capture and is unsuitable inside capture. CPU/Python code is not recorded as
+ordinary GPU graph nodes. After capture, graph replay does not re-run the
+original per-operator configuration lookup. Eager work can run before or after
+replay; keeping a global freeze active also forbids cold preparation there.
+
+Program and function caches use short locks; compilation does not hold those
+locks. Concurrent misses may compile redundantly, but publication retains a
+completed program and backend loading is synchronized.
