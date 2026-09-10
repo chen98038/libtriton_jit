@@ -22,6 +22,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -36,6 +37,7 @@
 #include "triton_jit/backend_config.h"
 #include "triton_jit/backend_policy.h"
 #include "triton_jit/device_ptr.h"
+#include "triton_jit/freeze.h"
 #include "triton_jit/jit_function_arg.h"
 #include "triton_jit/jit_utils.h"
 #include "triton_jit/triton_kernel.h"
@@ -354,6 +356,8 @@ class TritonJITFunctionImpl {
 
   /// Cached compiled kernels (keyed by signature)
   mutable std::unordered_map<std::string, TritonKernelImpl<Backend>> overloads_;
+  mutable std::mutex overloads_mu_;
+  inline static std::mutex functions_mu_;
 
   /// Global registry of all TritonJITFunctionImpl instances
   static std::unordered_map<std::string, std::unique_ptr<TritonJITFunctionImpl<Backend>>> functions_;
@@ -362,14 +366,33 @@ class TritonJITFunctionImpl {
   static TritonJITFunctionImpl& get_instance(std::string_view path, std::string_view name) {
     std::string key = fmt::format("{}:{}", path, name);
 
-    auto it = functions_.find(key);
-    if (it == functions_.end()) {
-      // Use new instead of make_unique since constructor is private
-      auto ptr = std::unique_ptr<TritonJITFunctionImpl>(new TritonJITFunctionImpl(path, name));
-      functions_.emplace(key, std::move(ptr));
+    {
+      std::lock_guard<std::mutex> lock(functions_mu_);
+      auto it = functions_.find(key);
+      if (it != functions_.end()) return *it->second;
     }
+    detail::refuse_if_frozen(nullptr, key, ColdWork::kFunction);
+    auto ptr = std::unique_ptr<TritonJITFunctionImpl>(new TritonJITFunctionImpl(path, name));
+    std::lock_guard<std::mutex> lock(functions_mu_);
+    auto [it, inserted] = functions_.try_emplace(key, std::move(ptr));
+    return *it->second;
+  }
 
-    return *functions_.at(key);
+  bool is_prepared(std::string_view signature, const CompileOptions& opts, int device_index) const {
+    const auto key = detail::make_kernel_cache_key(std::string(signature), device_index, opts);
+    std::lock_guard<std::mutex> lock(overloads_mu_);
+    auto found = overloads_.find(key);
+    return found != overloads_.end() && found->second.is_loaded();
+  }
+
+  // Compile/load only: does not launch the kernel or mutate caller tensors.
+  // The caller supplies the signature and options selected during config preparation.
+  void prepare(std::string_view signature, const CompileOptions& opts, int device_index,
+               void* stream = nullptr) const {
+    Backend::ensure_context();
+    if (Backend::get_device_index() != device_index)
+      throw std::invalid_argument("prepare: current device differs from requested device");
+    get_kernel(signature, opts, device_index, stream).prepare(stream);
   }
 
   // Delete copy constructor and assignment
@@ -434,9 +457,9 @@ class TritonJITFunctionImpl {
     Backend::ensure_context();
     int device_index = Backend::get_device_index();
 
-    // Get or compile kernel
+    // Get or compile kernel (a compile is refused while frozen or capturing)
     const TritonKernelImpl<Backend>& kernel =
-        this->get_kernel(full_signature, copts, device_index);
+        this->get_kernel(full_signature, copts, device_index, reinterpret_cast<void*>(stream));
 
     // Launch kernel with signature (for NPU backend to parse argument types)
     c10::SmallVector<void*> ptrs = buffer.get_ptrs();
@@ -466,16 +489,19 @@ class TritonJITFunctionImpl {
     copts.num_warps = static_cast<int>(num_warps);
     copts.num_stages = static_cast<int>(num_stages);
     const TritonKernelImpl<Backend>& kernel =
-        this->get_kernel(full_signature, copts, device_index);
+        this->get_kernel(full_signature, copts, device_index, reinterpret_cast<void*>(stream));
 
     kernel.launch_with_signature(grid_x, grid_y, grid_z, num_warps, stream, args, full_signature, num_args);
   }
 
  private:
   TritonJITFunctionImpl(std::string_view path, std::string_view name);
+  // `stream` is only consulted on a cache miss, to refuse compiling while the
+  // stream is being captured (see freeze.h); nullptr skips that check.
   const TritonKernelImpl<Backend>& get_kernel(std::string_view signature,
                                               const CompileOptions& opts,
-                                              int device_index) const;
+                                              int device_index,
+                                              void* stream = nullptr) const;
 };
 
 // Initialize static member
