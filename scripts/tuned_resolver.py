@@ -27,10 +27,10 @@ from __future__ import annotations
 
 import copy
 import math
-import types
-from contextlib import nullcontext
 import os
 import sys
+import types
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -184,24 +184,33 @@ def _local_tuner(tuner):
             setattr(local, name, types.MethodType(value.__func__, local))
     local.configs = list(tuner.configs)
     local.nargs = None
-    if getattr(tuner, "user_defined_pre_hook", False) or getattr(tuner, "user_defined_post_hook", False):
-        raise _UnsupportedBenchmark("custom tuner hooks require a consumer launch hook and are unsupported")
+    if getattr(tuner, "user_defined_pre_hook", False) or getattr(
+        tuner, "user_defined_post_hook", False
+    ):
+        raise _UnsupportedBenchmark(
+            "custom tuner hooks require a consumer launch hook and are unsupported"
+        )
     if getattr(tuner, "shared_config_pre_hook", None) is not None:
-        raise _UnsupportedBenchmark("shared_config_pre_hook requires a consumer launch hook")
+        raise _UnsupportedBenchmark(
+            "shared_config_pre_hook requires a consumer launch hook"
+        )
     reset = tuple(getattr(tuner, "reset_to_zero", ()) or ())
     restore = tuple(getattr(tuner, "restore_value", ()) or ())
     if reset or restore:
         copies = {}
+
         def pre_hook(named, reset_only=False):
             for name in reset:
                 named[name].zero_()
             if not reset_only:
                 copies.clear()
                 copies.update((name, named[name].clone()) for name in restore)
+
         def post_hook(named, exception=None):
             for name in restore:
                 named[name].copy_(copies[name])
             copies.clear()
+
         local.pre_hook, local.post_hook = pre_hook, post_hook
     return local
 
@@ -218,29 +227,48 @@ def _clone_arguments(args, kwargs):
         import torch
     except ImportError:
         return tuple(args), dict(kwargs)
-    budget = int(os.environ.get("TRITON_JIT_BENCH_MAX_BYTES", str(1024 ** 3)))
+    budget = int(os.environ.get("TRITON_JIT_BENCH_MAX_BYTES", str(1024**3)))
     storages = {}
     used = 0
+
     def clone(value):
         nonlocal used
         if not torch.is_tensor(value):
             return value
-        if value.layout != torch.strided or value.is_conj() or value.is_neg() or value.is_quantized:
-            raise _UnsupportedBenchmark("benchmark requires ordinary strided tensor views")
+        if (
+            value.layout != torch.strided
+            or value.is_conj()
+            or value.is_neg()
+            or value.is_quantized
+        ):
+            raise _UnsupportedBenchmark(
+                "benchmark requires ordinary strided tensor views"
+            )
         storage = value.untyped_storage()
         key = (value.device, storage._cdata)
         if key not in storages:
             size = storage.nbytes()
             used += size
             if used > budget:
-                raise _UnsupportedBenchmark("benchmark storage copies exceed TRITON_JIT_BENCH_MAX_BYTES")
+                raise _UnsupportedBenchmark(
+                    "benchmark storage copies exceed TRITON_JIT_BENCH_MAX_BYTES"
+                )
             with torch.no_grad():
-                raw = torch.empty(0, dtype=torch.uint8, device=value.device).set_(storage, 0, (size,), (1,))
+                raw = torch.empty(0, dtype=torch.uint8, device=value.device).set_(
+                    storage, 0, (size,), (1,)
+                )
                 storages[key] = raw.clone().untyped_storage()
         with torch.no_grad():
             return torch.empty(0, dtype=value.dtype, device=value.device).set_(
-                storages[key], value.storage_offset(), tuple(value.shape), tuple(value.stride()))
-    return tuple(clone(value) for value in args), {name: clone(value) for name, value in kwargs.items()}
+                storages[key],
+                value.storage_offset(),
+                tuple(value.shape),
+                tuple(value.stride()),
+            )
+
+    return tuple(clone(value) for value in args), {
+        name: clone(value) for name, value in kwargs.items()
+    }
 
 
 def _select_config(
@@ -272,7 +300,11 @@ def _select_config(
         else:
             if not launch_kwargs:
                 raise _NeedsGrid()
-            bench_args, isolated_kwargs = _clone_arguments(args, kwargs) if clone_tensors else (tuple(args), dict(kwargs))
+            bench_args, isolated_kwargs = (
+                _clone_arguments(args, kwargs)
+                if clone_tensors
+                else (tuple(args), dict(kwargs))
+            )
             bench_kwargs = {**isolated_kwargs, **launch_kwargs}
             tuner.nargs = dict(zip(tuner.arg_names, bench_args))
             if hasattr(tuner, "get_benchmark_key"):
