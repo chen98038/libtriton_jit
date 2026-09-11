@@ -198,6 +198,8 @@ a miss leaves the fallback choice to the caller.
 
 `prepare()` compiles and loads a program before freezing or graph capture.
 
+An optional Torch resolver fills cold misses; warm configuration hits stay in C++.
+
 See [Autotune usage and contracts](docs/autotune.md) for setup and examples.
 
 ## How to build
