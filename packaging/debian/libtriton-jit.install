@@ -1,3 +1,0 @@
-usr/lib/*/libtriton_jit.so
-usr/lib/*/libtriton_jit_torch_resolver.so
-usr/share/triton_jit/scripts/*.py
