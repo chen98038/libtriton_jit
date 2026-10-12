@@ -58,6 +58,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import export_tuned_table as _export  # noqa: E402  (same directory)
+from _backend_init import initialize_backend  # noqa: E402
 from export_tuned_table import kernel_identity, unwrap_to_jit_function  # noqa: E402
 
 _tuner_index: Dict[Tuple[str, str, Optional[str]], Any] = {}
@@ -84,6 +85,7 @@ class TritonDtype(str):
     resolver materialises it right before the tuner sees the arguments."""
 
     def materialize(self) -> Any:
+        initialize_backend()
         import triton.language as tl
 
         name = self[3:] if self.startswith("tl.") else str(self)
@@ -145,6 +147,7 @@ def _libentry_module(package_name: str):
 
 def _native_autotuner_class():
     try:
+        initialize_backend()
         from triton.runtime.autotuner import Autotuner
     except Exception:  # noqa: BLE001 - without Triton there is nothing native to find
         return None
@@ -277,6 +280,7 @@ def build_grid(
     if isinstance(grid, str):
         scope: Dict[str, Any] = {"math": math}
         try:
+            initialize_backend()
             import triton
 
             scope["triton"] = triton

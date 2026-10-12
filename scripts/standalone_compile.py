@@ -24,7 +24,9 @@ import json
 import linecache
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import tokenize
 from argparse import ArgumentParser
 from pathlib import Path
@@ -34,6 +36,14 @@ from typing import List, Tuple, Union
 backend_env = os.environ.get("TRITON_JIT_BACKEND", "").upper()
 if backend_env in ["NPU", "MTGPU", "MACA", "GCU", "MLU"]:
     os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
+# Also support callers loading this helper by absolute file path.
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from _backend_init import initialize_backend  # noqa: E402
+
+initialize_backend()
 
 import torch  # noqa: E402
 
@@ -416,7 +426,8 @@ def kernel_suffix(signature, specialization):
 def _coerce_opt(v):
     """Coerce a string option value coming from the C++ CompileOptions.extra map into
     the type triton.compile expects (int / float / bool), else keep it as a string.
-    C++ can only hand us strings, but options like num_ctas are ints and some are bools."""
+    C++ can only hand us strings, but options like num_ctas are ints and some are bools.
+    """
     if not isinstance(v, str):
         return v
     low = v.strip().lower()
@@ -560,7 +571,9 @@ def _compile_a_kernel(
     # (GCU hardware/compiler does not support double precision operations)
     if get_backend() == "GCU":
         for k in signature_without_spec:
-            signature_without_spec[k] = _normalize_gcu_signature(signature_without_spec[k])
+            signature_without_spec[k] = _normalize_gcu_signature(
+                signature_without_spec[k]
+            )
 
     if Version("3.0.0") <= triton_version < Version("3.2.0"):
         src = triton.compiler.ASTSource(
@@ -613,10 +626,38 @@ def _compile_a_kernel(
 
     # STEP3: ast source, target, compile options (backend-specific)
     backend = get_backend()
+    if backend == "NPU" and opts.get("enable_auto_blockify") is None:
+        # Ascend otherwise resolves this environment variable after computing
+        # the compilation cache key. Make the effective mode an explicit option
+        # so that both the binary's cache key and its metadata preserve it.
+        opts["enable_auto_blockify"] = os.getenv(
+            "TRITON_ALL_BLOCKS_PARALLEL", "false"
+        ).lower() in ("true", "1")
     if backend in ["NPU", "MUSA", "MTGPU", "MACA", "GCU"]:
         # NPU/MUSA/MTGPU/MACA/GCU: no CUDA device context manager
         target = triton.runtime.driver.active.get_current_target()
-        ccinfo = triton.compile(src, target=target, options=opts)
+        if backend == "NPU":
+            # Some Ascend compiler stages still consult only the environment,
+            # even when the launcher honors the per-kernel option. The public
+            # entry point isolates conflicting overrides in a child process.
+            environment_mode = os.getenv(
+                "TRITON_ALL_BLOCKS_PARALLEL", "false"
+            ).lower() in ("true", "1")
+            if opts["enable_auto_blockify"] != environment_mode:
+                raise ValueError(
+                    "Use compile_a_kernel for an NPU auto-blockify override"
+                )
+            from triton._C.libtriton import get_cache_invalidating_env_vars
+
+            env_vars = dict(get_cache_invalidating_env_vars())
+            # Also separate these artifacts from native/legacy cache entries
+            # whose metadata option may disagree with the generated binary.
+            env_vars["TRITON_ALL_BLOCKS_PARALLEL"] = "1" if environment_mode else "0"
+            ccinfo = triton.compile(
+                src, target=target, options=opts, _env_vars=env_vars
+            )
+        else:
+            ccinfo = triton.compile(src, target=target, options=opts)
     elif backend in ["MLU"]:
         # torch_mlu only registers torch.mlu when initialization sees CPU.
         # The embedded C++ runtime has already activated MLU, so re-run
@@ -628,17 +669,15 @@ def _compile_a_kernel(
             torch.accelerator.current_accelerator = lambda *args, **kwargs: None
             try:
                 _sys.modules.pop("torch_mlu", None)
-                import torch_mlu  # noqa: F401
+                import torch_mlu  # noqa: F401, F811 - Re-register after removing the cached module.
             finally:
                 torch.accelerator.current_accelerator = _orig_cur
             if not hasattr(torch, "mlu"):
-                raise RuntimeError(
-                    "failed to register torch.mlu for MLU triton driver"
-                )
+                raise RuntimeError("failed to register torch.mlu for MLU triton driver")
 
         target = triton.runtime.driver.active.get_current_target()
-        opts['is_linear_hint'] = True
-        opts['restrict_ptr_hint'] = True
+        opts["is_linear_hint"] = True
+        opts["restrict_ptr_hint"] = True
         mlu_backend = triton.compiler.make_backend(target)
         opts = mlu_backend.parse_options(opts)
         ccinfo = triton.compile(src, target=target, options=opts.__dict__)
@@ -744,6 +783,42 @@ def compile_a_kernel(
     device_id: int = 0,
     extra_options: dict = None,
 ):
+    if get_backend() == "NPU":
+        options = _merge_compile_options(num_warps, num_stages, extra_options)
+        enabled = options.get("enable_auto_blockify")
+        environment_mode = os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "false").lower() in (
+            "true",
+            "1",
+        )
+        if enabled is not None and not isinstance(enabled, bool):
+            raise ValueError("enable_auto_blockify must be a boolean")
+        if enabled is not None and enabled != environment_mode:
+            # Do not temporarily change os.environ in this process: other
+            # threads may be compiling native Triton kernels concurrently.
+            with tempfile.TemporaryDirectory(prefix="triton-jit-npu-") as temporary:
+                result_path = Path(temporary) / "cache_path.txt"
+                request = {
+                    "source_path": str(Path(source_path).resolve()),
+                    "fn_name": fn_name,
+                    "signature": signature,
+                    "num_warps": num_warps,
+                    "num_stages": num_stages,
+                    "device_id": device_id,
+                    "extra_options": extra_options,
+                    "python_path": sys.path,
+                    "result_path": str(result_path),
+                }
+                subprocess.run(
+                    [sys.executable, str(Path(_SCRIPT_DIR) / "_npu_compile_worker.py")],
+                    input=json.dumps(request),
+                    text=True,
+                    check=True,
+                    env={
+                        **os.environ,
+                        "TRITON_ALL_BLOCKS_PARALLEL": "1" if enabled else "0",
+                    },
+                )
+                return result_path.read_text()
     # get jit function
     source_path = Path(source_path)
     spec = importlib.util.spec_from_file_location(source_path.stem, source_path)
@@ -755,7 +830,9 @@ def compile_a_kernel(
     while not (type(fn) is triton.runtime.JITFunction):
         fn = fn.fn
 
-    return _compile_a_kernel(fn, signature, num_warps, num_stages, device_id, extra_options)
+    return _compile_a_kernel(
+        fn, signature, num_warps, num_stages, device_id, extra_options
+    )
 
 
 if __name__ == "__main__":

@@ -117,3 +117,45 @@ if(TRITON_JIT_TEST_CUDA)
             ${PROJECT_SOURCE_DIR}/scripts bridge $<TARGET_FILE_DIR:tuned_runtime_probe>)
     set_tests_properties(tuned_native_python tuned_native_bridge PROPERTIES LABELS "autotune;cuda" TIMEOUT 300)
 endif()
+
+
+add_test(NAME backend_lazy_init_python
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_backend_lazy_init.py
+        ${PROJECT_SOURCE_DIR}/scripts)
+
+option(TRITON_JIT_TEST_NPU "Enable Ascend integration tests (requires an NPU)" OFF)
+if(TRITON_JIT_TEST_NPU)
+    if(NOT TRITON_JIT_BUILD_TORCH_RESOLVER OR NOT TRITON_BACKEND_NAME STREQUAL "NPU")
+        message(FATAL_ERROR "TRITON_JIT_TEST_NPU requires BACKEND=NPU and TRITON_JIT_BUILD_TORCH_RESOLVER=ON")
+    endif()
+    pybind11_add_module(npu_runtime_probe MODULE npu/runtime_probe.cpp)
+    target_link_libraries(npu_runtime_probe PRIVATE TritonJIT::triton_jit_torch_resolver)
+    add_executable(test_npu_embedded_override npu/embedded_override.cpp)
+    target_link_libraries(test_npu_embedded_override PRIVATE TritonJIT::triton_jit pybind11::embed)
+    foreach(mode IN ITEMS 0 1)
+        set(npu_test_dir "${CMAKE_CURRENT_BINARY_DIR}/npu-auto-blockify-${mode}")
+        file(MAKE_DIRECTORY "${npu_test_dir}")
+        add_test(NAME npu_auto_blockify_${mode}
+            COMMAND ${CMAKE_COMMAND} -E env
+                TRITON_JIT_BACKEND=NPU TORCH_DEVICE_BACKEND_AUTOLOAD=0
+                TRITON_ALL_BLOCKS_PARALLEL=${mode}
+                TRITON_CACHE_DIR=${npu_test_dir}/cache
+                ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/npu/runtime_regression.py
+                $<TARGET_FILE_DIR:npu_runtime_probe> ${PROJECT_SOURCE_DIR}/scripts all
+                --output ${npu_test_dir}/results.json)
+        add_test(NAME npu_embedded_override_${mode}
+            COMMAND ${CMAKE_COMMAND} -E env
+                TRITON_JIT_BACKEND=NPU TORCH_DEVICE_BACKEND_AUTOLOAD=0
+                TRITON_ALL_BLOCKS_PARALLEL=${mode}
+                TRITON_CACHE_DIR=${npu_test_dir}/cache
+                $<TARGET_FILE:test_npu_embedded_override> ${PROJECT_SOURCE_DIR}/scripts
+                ${CMAKE_CURRENT_SOURCE_DIR}/npu/npu_kernels.py)
+        set_tests_properties(npu_auto_blockify_${mode} npu_embedded_override_${mode} PROPERTIES
+            LABELS "npu;autotune" RESOURCE_LOCK npu_device TIMEOUT 900)
+    endforeach()
+endif()
+
+add_executable(test_npu_metadata test_npu_metadata.cpp)
+target_link_libraries(test_npu_metadata PRIVATE TritonJIT::triton_jit)
+add_test(NAME npu_metadata_cpp COMMAND test_npu_metadata
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/npu_metadata)

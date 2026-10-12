@@ -57,12 +57,19 @@ VENDOR_TO_BACKEND = {
 _CONFIG_FIELD_CACHE: Optional[set] = None
 
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from _backend_init import initialize_backend  # noqa: E402
+
+
 def triton_config_fields() -> set:
     """Field names of triton.Config other than the kwargs dict."""
     global _CONFIG_FIELD_CACHE
     if _CONFIG_FIELD_CACHE is None:
         fields = {"num_warps", "num_stages", "num_ctas", "maxnreg", "pre_hook"}
         try:
+            initialize_backend()
             import triton
 
             params = inspect.signature(triton.Config.__init__).parameters
@@ -80,6 +87,7 @@ def triton_config_fields() -> set:
 def import_package_tree(package_name: str, walk_ops: bool = True) -> None:
     """Import a package and, by default, every module under ``<package>.ops`` so
     that decorators run and LibTuner instances exist."""
+    initialize_backend()
     package = importlib.import_module(package_name)
     if not walk_ops:
         return
@@ -460,6 +468,7 @@ def detect_fingerprint(
         "libtriton_jit_version": "",
     }
     try:
+        initialize_backend()
         import triton
 
         fp["triton_version"] = getattr(triton, "__version__", "")
