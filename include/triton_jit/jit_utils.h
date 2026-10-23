@@ -156,6 +156,23 @@ constexpr const char* ptr_spec(T v) {
   return v % 16 == 0 ? ":16" : "";
 }
 
+// Pointer-range specialization, the counterpart of the HCU backend's "S"
+// specialization in the native Python runtime (HIPBackend.is_within_2gb): a
+// pointer whose addressable extent fits in a signed 32-bit offset is tagged
+// ":range32", which standalone_compile turns into tt.pointer_range = 32 so the
+// kernel can use buffer instructions. Only HCU emits it; every other backend
+// keeps the plain pointer token. Whether the attribute is finally applied also
+// depends on the backend's buffer-ops switch, which standalone_compile checks.
+constexpr std::uint64_t kPointerRange32Max = 2147483647ULL;  // INT32_MAX
+
+constexpr const char* ptr_range_spec([[maybe_unused]] std::uint64_t extent_bytes) {
+#if defined(BACKEND_HCU)
+  return extent_bytes <= kPointerRange32Max ? ":range32" : "";
+#else
+  return "";
+#endif
+}
+
 template <typename T, typename = void>
 struct has_data_ptr : std::false_type {};
 

@@ -77,6 +77,32 @@ def get_backend():
 # pylint: disable-next=wrong-import-position
 triton_version = Version(triton.__version__)
 
+# Signature hint emitted by the C++ side (ptr_range_spec) for a pointer whose
+# addressable extent is at most INT32_MAX bytes.
+_POINTER_RANGE_32 = "range32"
+
+
+def _pointer_range_supported() -> bool:
+    """Whether a "range32" hint should become tt.pointer_range = 32.
+
+    The native runtime adds that attribute through the HCU backend's "S"
+    specialization, and only while buffer ops are enabled
+    (AMDGCN_USE_BUFFER_OPS). Follow the same switch so the C++ path never
+    specializes a kernel the Python path would not.
+    """
+    if get_backend() != "HCU" or triton_version.release[:2] < (3, 3):
+        return False
+    knobs = getattr(triton, "knobs", None)
+    for name in ("hcu", "amd"):
+        backend_knobs = getattr(knobs, name, None)
+        if backend_knobs is not None and hasattr(backend_knobs, "use_buffer_ops"):
+            return bool(backend_knobs.use_buffer_ops)
+    # Without a knobs entry, read the switch directly and only accept "1"; when
+    # in doubt the worst case is a missed optimization, never an unwarranted
+    # attribute.
+    return os.environ.get("AMDGCN_USE_BUFFER_OPS", "0") == "1"
+
+
 DESC = """
 Script to compile Triton Jit functions into Compiled Kernel and cache it into a cache dir.
 We return the kernel name and subdir path in which the kernel files site.
@@ -507,15 +533,34 @@ def _compile_a_kernel(
         if i not in constants
     }
 
-    # specialization: divisibility by 16 or equal to 1
-    hints = {
-        i: constexpr(s.rsplit(":", 1)[1])
-        for i, s in enumerate(signature)
-        if i not in constants and ":" in s
-    }
-    hints = {k: v for k, v in hints.items() if v is not None}
-    for h in hints.values():
-        assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
+    # specialization: divisibility by 16 or equal to 1, plus the HCU-only pointer
+    # range hint. A pointer token may carry both, e.g. "*fp32:16:range32".
+    hints = {}
+    pointer_range_32 = []
+    for i, s in enumerate(signature):
+        if i in constants or ":" not in s:
+            continue
+        type_part, *spec_parts = s.split(":")
+        for part in spec_parts:
+            if part == _POINTER_RANGE_32:
+                if not type_part.startswith("*"):
+                    raise ValueError(
+                        f"{_POINTER_RANGE_32} is only valid on a pointer, got {s}"
+                    )
+                if i in pointer_range_32:
+                    raise ValueError(f"duplicate {_POINTER_RANGE_32} in {s}")
+                pointer_range_32.append(i)
+                continue
+            h = constexpr(part)
+            if h is None:
+                continue
+            assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
+            assert i not in hints, f"duplicate specialization hint in {s}"
+            hints[i] = h
+    if pointer_range_32 and not _pointer_range_supported():
+        # The hint is part of the signature (and so of the C++ cache key) either
+        # way; it only becomes an attribute when the backend would add one itself.
+        pointer_range_32 = []
     divisible_by_16 = tuple(i for i, h in hints.items() if h == 16)
     equal_to_1 = tuple(i for i, h in hints.items() if h == 1)
 
@@ -547,6 +592,17 @@ def _compile_a_kernel(
             "You can goto https://github.com/flagos-ai/libtriton_jit to raise an issue "
             "about supporting your triton version. Triton 3.1/3.2/3.3/3.4/3.5/3.6 are supported now."
         )
+
+    # Same attribute the HCU backend's parse_attr derives from its "S"
+    # specialization for a tensor; _pointer_range_supported() guarantees the
+    # dict-style attrs of Triton >= 3.3 here.
+    for i in pointer_range_32:
+        attrs.setdefault((i,), []).append(["tt.pointer_range", 32])
+    if pointer_range_32:
+        # ASTSource.hash() serializes attrs with str(), so key order is part of
+        # the compilation cache key. The native runtime lists arguments in
+        # order; a range-only pointer appended above would otherwise come last.
+        attrs = dict(sorted(attrs.items()))
 
     # integer 1 in value, but the corresponding ArgType in static signature is not constexpr are added into constants
     for i in equal_to_1:

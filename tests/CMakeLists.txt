@@ -50,6 +50,17 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/equal_to_one_module.py
 )
 
+add_test(
+    NAME standalone_pointer_range
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        TRITON_JIT_BACKEND=${TRITON_BACKEND_NAME}
+        ${Python_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_standalone_pointer_range.py
+        ${PROJECT_SOURCE_DIR}/scripts/standalone_compile.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/equal_to_one_module.py
+)
+
 add_executable(test_tuned_config test_tuned_config.cpp)
 target_link_libraries(test_tuned_config PRIVATE TritonJIT::triton_jit)
 target_compile_definitions(

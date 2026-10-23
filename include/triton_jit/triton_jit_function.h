@@ -217,6 +217,10 @@ struct ArgHandle {
       handle_tensor(item);
     } else if constexpr (is_same_ignore_cvref<TritonDevicePtr, T>::value) {
       handle_device_ptr(item);
+    } else if constexpr (is_same_ignore_cvref<TritonBoundedDevicePtr, T>::value) {
+      // size_bytes == 0 is "unknown": behave exactly like the bare pointer.
+      handle_device_ptr(item.pointer,
+                        item.size_bytes > 0 ? std::optional<std::uint64_t>(item.size_bytes) : std::nullopt);
     } else if constexpr (is_same_ignore_cvref<std::nullopt_t, T>::value) {
       // Assumption: nullopt is always treated as constexpr,
       // even if the parameter is not marked as constexpr
@@ -260,14 +264,25 @@ struct ArgHandle {
       specialization = ptr_spec(reinterpret_cast<std::uintptr_t>(p_item));
 #endif
     }
-    std::string sig_for_idx = fmt::format("*{}{}", dtype, specialization);
+    // The native runtime measures a tensor's extent by its whole storage
+    // (untyped_storage().size()), not by the bytes past data_ptr(); do the same
+    // so both paths produce the same specialization and share compiled kernels.
+    const char* range = "";
+#if defined(BACKEND_HCU)
+    if (pointer_range_specializable() && item.has_storage()) {
+      range = ptr_range_spec(static_cast<std::uint64_t>(item.storage().nbytes()));
+    }
+#endif
+    std::string sig_for_idx = fmt::format("*{}{}{}", dtype, specialization, range);
     signature.push_back(sig_for_idx);
   }
 
   // Raw device pointer with an explicit element dtype (see device_ptr.h).
   // Mirrors handle_tensor: pushed into the runtime ABI verbatim, specialized
-  // only on 16-byte address alignment.
-  void handle_device_ptr(const TritonDevicePtr& item) {
+  // on 16-byte address alignment and, when the caller supplied the extent
+  // (TritonBoundedDevicePtr), on its pointer range.
+  void handle_device_ptr(const TritonDevicePtr& item,
+                         std::optional<std::uint64_t> extent_bytes = std::nullopt) {
     // Assumption: a device pointer is never constexpr
     TORCH_CHECK(this->ssig.at(idx) != ArgType::CONSTEXPR);
     this->buf.push_arg(item.value);
@@ -281,8 +296,20 @@ struct ArgHandle {
       specialization = ptr_spec(item.value);
 #endif
     }
-    std::string sig_for_idx = fmt::format("*{}{}", dtype, specialization);
+    const char* range = "";
+    if (pointer_range_specializable() && extent_bytes.has_value()) {
+      range = ptr_range_spec(*extent_bytes);
+    }
+    std::string sig_for_idx = fmt::format("*{}{}{}", dtype, specialization, range);
     signature.push_back(sig_for_idx);
+  }
+
+  // Pointer-range specialization follows the native runtime: it is skipped only
+  // for do_not_specialize parameters. do_not_specialize_on_alignment turns off
+  // the ":16" hint but, as in Python, still allows the range hint.
+  bool pointer_range_specializable() const {
+    const ArgType kind = ssig.at(idx);
+    return kind == ArgType::SPECIALIZED || kind == ArgType::SPECIALIZED_NO_ALIGNMENT;
   }
 
   template <typename T>
